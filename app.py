@@ -15,13 +15,21 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from database import SessionLocal, init_db
 from models import User, Upload
+from datetime import datetime
+import uuid
+from werkzeug.utils import secure_filename  # For filename sanitization
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Initialiser la base de données
+# Initialize the database
 init_db()
 
-# Dépendance pour obtenir la session de base de données
+# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -29,10 +37,10 @@ def get_db():
     finally:
         db.close()
 
-# Configuration CORS
+# CORS configuration
 origins = [
-    "http://localhost:4200",  # Adresse de votre application Angular
-    # Ajoutez d'autres origines si nécessaire
+    "http://localhost:4200",  # Your Angular app's address
+    # Add other origins if necessary
 ]
 
 app.add_middleware(
@@ -43,39 +51,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuration de l'appareil et du type de données
-device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+# Device configuration for PyTorch and Transformers pipeline
+if torch.cuda.is_available():
+    torch_device = "cuda:0"
+    pipeline_device = 0  # GPU index for Transformers pipeline
+    logger.info("Using CUDA for both PyTorch and Transformers pipeline.")
+elif torch.backends.mps.is_available():
+    torch_device = "mps"
+    pipeline_device = -1  # Transformers pipeline does not support MPS
+    logger.info("Using MPS for PyTorch and CPU for Transformers pipeline.")
+else:
+    torch_device = "cpu"
+    pipeline_device = -1  # CPU for Transformers pipeline
+    logger.info("Using CPU for both PyTorch and Transformers pipeline.")
 
-# Identifiant du modèle
+# Model identifier
 model_id = "openai/whisper-large-v3"
 
-# Chargement du modèle et du processeur
-print("Loading model and processor...")
+# Load model and processor
+logger.info("Loading model and processor...")
 model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
+    model_id, torch_dtype=torch.float16 if torch_device.startswith("cuda") else torch.float32, 
+    low_cpu_mem_usage=True, use_safetensors=True
 )
-model.to(device)
+model.to(torch_device)
 processor = AutoProcessor.from_pretrained(model_id)
-print("Model and processor loaded.")
+logger.info("Model and processor loaded.")
 
-# Création du pipeline de reconnaissance vocale
+# Create ASR pipeline
 asr_pipeline = pipeline(
     "automatic-speech-recognition",
     model=model,
     tokenizer=processor.tokenizer,
     feature_extractor=processor.feature_extractor,
-    torch_dtype=torch_dtype,
-    device=device,
+    device=pipeline_device,
     generate_kwargs={"language": "french"}
 )
 
-# Dossier pour stocker les fichiers audio
+# Directory to store audio files
 AUDIO_DIR = "audio_files"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# Création d'un pool de threads pour les opérations bloquantes
-executor = ThreadPoolExecutor(max_workers=4)  # Ajustez le nombre de threads selon vos besoins
+# Thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=4)  # Adjust as needed
 
 @app.post("/upload-audio/")
 async def upload_audio(
@@ -84,23 +102,26 @@ async def upload_audio(
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint pour uploader un fichier audio et obtenir sa transcription.
+    Endpoint to upload an audio file and receive its transcription.
     """
-    print(f"Received file: {file.filename}, content_type: {file.content_type}, from user_id: {user_id}")
+    logger.info(f"Received file: {file.filename}, content_type: {file.content_type}, from user_id: {user_id}")
     
-    # Vérifier si l'utilisateur existe, sinon le créer
+    # Sanitize the original filename
+    original_filename = secure_filename(file.filename)
+    
+    # Check if user exists, else create
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         user = User(id=user_id, username=f"user_{user_id}")
         db.add(user)
         db.commit()
         db.refresh(user)
-        print(f"Created new user with id: {user_id}")
+        logger.info(f"Created new user with id: {user_id}")
     
-    # Extraire le type principal du content_type
+    # Extract the main content type
     content_type_main = file.content_type.split(';')[0].strip()
     
-    # Liste des types audio supportés
+    # Supported audio types
     supported_types = [
         "audio/wav",
         "audio/mpeg",
@@ -111,58 +132,66 @@ async def upload_audio(
         "audio/flac",
     ]
     
-    # Vérifier si le type est supporté
+    # Check if the type is supported
     if content_type_main not in supported_types:
-        print("Unsupported file type.")
-        raise HTTPException(status_code=400, detail="Format de fichier audio non supporté.")
+        logger.warning("Unsupported file type.")
+        raise HTTPException(status_code=400, detail="Unsupported audio file format.")
     
-    # Sauvegarder le fichier audio
-    original_filename = file.filename
+    # Save the uploaded audio file
     file_path = os.path.join(AUDIO_DIR, original_filename)
     with open(file_path, "wb") as f:
         f.write(await file.read())
-    print(f"File saved to {file_path}")
+    logger.info(f"File saved to {file_path}")
     
-    # Convertir l'audio en wav si nécessaire
+    # Convert to WAV if necessary
     if content_type_main != "audio/wav":
         try:
             audio = AudioSegment.from_file(file_path)
-            wav_filename = os.path.splitext(original_filename)[0] + ".wav"
+            # Append a UUID to ensure unique transcription filename
+            unique_id = uuid.uuid4().hex
+            wav_filename = f"{os.path.splitext(original_filename)[0]}_{unique_id}.wav"
             wav_path = os.path.join(AUDIO_DIR, wav_filename)
-            audio = audio.set_channels(1)  # Convertir en mono
+            audio = audio.set_channels(1)  # Convert to mono
             audio.export(wav_path, format="wav")
-            os.remove(file_path)  # Supprimer le fichier original
+            os.remove(file_path)  # Remove original file
             file_path = wav_path
-            original_filename = wav_filename  # Mettre à jour le nom du fichier
-            print(f"Converted file to {wav_path}")
+            original_filename = wav_filename  # Update filename
+            logger.info(f"Converted file to {wav_path}")
         except Exception as e:
-            print(f"Error converting audio: {e}")
-            raise HTTPException(status_code=400, detail=f"Erreur lors de la conversion de l'audio : {e}")
+            logger.error(f"Error converting audio: {e}")
+            raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
     
-    # Charger et traiter l'audio de manière asynchrone
+    # Process transcription asynchronously
     try:
         transcription = await asyncio.get_event_loop().run_in_executor(executor, process_transcription, file_path)
     except Exception as e:
-        print(f"Error during transcription: {e}")
-        raise HTTPException(status_code=500, detail=f"Erreur lors de la transcription de l'audio : {e}")
+        logger.error(f"Error during transcription: {e}")
+        raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
     
-    # Sauvegarder la transcription dans un fichier texte
-    transcription_filename = f"{os.path.splitext(os.path.basename(original_filename))[0]}_transcription.txt"
+    # Generate a unique transcription filename using UUID
+    transcription_unique_id = uuid.uuid4().hex
+    transcription_filename = f"{os.path.splitext(os.path.basename(original_filename))[0]}_transcription_{transcription_unique_id}.txt"
     transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
+    
+    # Save the transcription to a text file
     with open(transcription_path, "w", encoding="utf-8") as f:
         f.write(transcription.strip())
-    print(f"Transcription saved to {transcription_path}")
+    logger.info(f"Transcription saved to {transcription_path}")
     
-    # Enregistrer les informations dans la base de données
+    # Save upload record to the database
     upload_record = Upload(
-        filename=original_filename,  # Utiliser le nom du fichier sauvegardé
+        filename=original_filename,  # Saved audio filename
         transcription_filename=transcription_filename,
         owner=user
     )
     db.add(upload_record)
-    db.commit()
-    db.refresh(upload_record)
-    print(f"Upload record created with id: {upload_record.id}")
+    try:
+        db.commit()
+        db.refresh(upload_record)
+        logger.info(f"Upload record created with id: {upload_record.id}")
+    except Exception as e:
+        logger.error(f"Database commit failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save upload record to the database.")
     
     return JSONResponse(content={
         "transcription": transcription.strip(),
@@ -172,38 +201,38 @@ async def upload_audio(
 
 def process_transcription(file_path):
     """
-    Fonction bloquante pour traiter la transcription de l'audio.
+    Blocking function to process audio transcription.
     """
-    print(f"Processing transcription for {file_path}")
-    # Charger l'audio avec SoundFile
+    logger.info(f"Processing transcription for {file_path}")
+    # Load audio with SoundFile
     audio_data, samplerate = sf.read(file_path)
-    print(f"Audio data loaded: {len(audio_data)} samples at {samplerate} Hz")
+    logger.info(f"Audio data loaded: {len(audio_data)} samples at {samplerate} Hz")
     
-    # Resampler si nécessaire
+    # Resample if necessary
     if samplerate != 16000:
         try:
             audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
             samplerate = 16000
-            print(f"Audio resampled to {samplerate} Hz")
+            logger.info(f"Audio resampled to {samplerate} Hz")
         except Exception as e:
-            print(f"Error resampling audio: {e}")
+            logger.error(f"Error resampling audio: {e}")
             raise e
     
-    # Diviser l'audio en segments de 30 secondes
+    # Divide audio into 30-second segments
     segments = diviser_audio(audio_data, samplerate, duree_max=30)
-    print(f"Audio divided into {len(segments)} segment(s).")
+    logger.info(f"Audio divided into {len(segments)} segment(s).")
     
     transcription_complete = ""
     
     for idx, segment in enumerate(segments):
         try:
-            print(f"Processing segment {idx + 1}/{len(segments)}")
-            # Utiliser le pipeline ASR pour la transcription
+            logger.info(f"Processing segment {idx + 1}/{len(segments)}")
+            # Use ASR pipeline for transcription
             transcription = asr_pipeline(segment)["text"]
             transcription_complete += transcription + " "
-            print(f"Segment {idx + 1} transcription: {transcription}")
+            logger.info(f"Segment {idx + 1} transcription: {transcription}")
         except Exception as e:
-            print(f"Error processing segment {idx + 1}: {e}")
+            logger.error(f"Error processing segment {idx + 1}: {e}")
             raise e
     
     return transcription_complete
@@ -211,48 +240,48 @@ def process_transcription(file_path):
 @app.get("/download-transcription/{upload_id}")
 async def download_transcription(upload_id: int, db: Session = Depends(get_db)):
     """
-    Endpoint pour télécharger la transcription d'un upload spécifique.
+    Endpoint to download the transcription of a specific upload.
     """
     upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
     if not upload_record:
-        print(f"Transcription record not found for upload_id: {upload_id}")
-        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé.")
+        logger.warning(f"Transcription record not found for upload_id: {upload_id}")
+        raise HTTPException(status_code=404, detail="Transcription file not found.")
     
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
     if not os.path.exists(transcription_path):
-        print(f"Transcription file not found: {upload_record.transcription_filename}")
-        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé.")
+        logger.warning(f"Transcription file not found: {upload_record.transcription_filename}")
+        raise HTTPException(status_code=404, detail="Transcription file not found.")
     
-    print(f"Transcription file found: {upload_record.transcription_filename}")
+    logger.info(f"Transcription file found: {upload_record.transcription_filename}")
     return FileResponse(transcription_path, media_type='text/plain', filename=upload_record.transcription_filename)
 
 @app.get("/download-audio/{upload_id}")
 async def download_audio(upload_id: int, db: Session = Depends(get_db)):
     """
-    Endpoint pour télécharger le fichier audio original d'un upload spécifique.
+    Endpoint to download the original audio file of a specific upload.
     """
     upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
     if not upload_record:
-        print(f"Audio record not found for upload_id: {upload_id}")
-        raise HTTPException(status_code=404, detail="Fichier audio non trouvé.")
+        logger.warning(f"Audio record not found for upload_id: {upload_id}")
+        raise HTTPException(status_code=404, detail="Audio file not found.")
     
     audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
     if not os.path.exists(audio_path):
-        print(f"Audio file not found: {upload_record.filename}")
-        raise HTTPException(status_code=404, detail="Fichier audio non trouvé.")
+        logger.warning(f"Audio file not found: {upload_record.filename}")
+        raise HTTPException(status_code=404, detail="Audio file not found.")
     
-    print(f"Audio file found: {upload_record.filename}")
+    logger.info(f"Audio file found: {upload_record.filename}")
     return FileResponse(audio_path, media_type='audio/wav', filename=upload_record.filename)
 
 @app.get("/history/{user_id}")
 async def get_history(user_id: int, db: Session = Depends(get_db)):
     """
-    Endpoint pour récupérer l'historique des uploads d'un utilisateur.
+    Endpoint to retrieve the upload history of a user.
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        print(f"User not found with id: {user_id}")
-        raise HTTPException(status_code=404, detail="Utilisateur non trouvé.")
+        logger.warning(f"User not found with id: {user_id}")
+        raise HTTPException(status_code=404, detail="User not found.")
     
     uploads = db.query(Upload).filter(Upload.user_id == user_id).all()
     history = []
@@ -264,23 +293,23 @@ async def get_history(user_id: int, db: Session = Depends(get_db)):
             "upload_time": upload.upload_time.isoformat()
         })
     
-    print(f"Retrieved history for user_id: {user_id}, total uploads: {len(history)}")
+    logger.info(f"Retrieved history for user_id: {user_id}, total uploads: {len(history)}")
     return JSONResponse(content={"history": history})
 
 @app.get("/get-transcription/{upload_id}")
 async def get_transcription(upload_id: int, db: Session = Depends(get_db)):
     """
-    Endpoint pour récupérer le texte de la transcription d'un upload spécifique.
+    Endpoint to retrieve the transcription text of a specific upload.
     """
     upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
     if not upload_record:
-        print(f"Transcription record not found for upload_id: {upload_id}")
-        raise HTTPException(status_code=404, detail="Transcription non trouvée.")
+        logger.warning(f"Transcription record not found for upload_id: {upload_id}")
+        raise HTTPException(status_code=404, detail="Transcription not found.")
     
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
     if not os.path.exists(transcription_path):
-        print(f"Transcription file not found: {upload_record.transcription_filename}")
-        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé.")
+        logger.warning(f"Transcription file not found: {upload_record.transcription_filename}")
+        raise HTTPException(status_code=404, detail="Transcription file not found.")
     
     with open(transcription_path, "r", encoding="utf-8") as f:
         transcription = f.read()
@@ -289,12 +318,12 @@ async def get_transcription(upload_id: int, db: Session = Depends(get_db)):
 
 def diviser_audio(audio, samplerate=16000, duree_max=30):
     """
-    Divise l'audio en segments de durée maximale spécifiée.
-
-    :param audio: Tableau numpy contenant les données audio
-    :param samplerate: Taux d'échantillonnage (Hz)
-    :param duree_max: Durée maximale de chaque segment en secondes
-    :return: Liste de segments audio
+    Divides audio into segments with a maximum duration.
+    
+    :param audio: Numpy array containing audio data
+    :param samplerate: Sampling rate in Hz
+    :param duree_max: Maximum duration of each segment in seconds
+    :return: List of audio segments
     """
     frames_max = int(duree_max * samplerate)
     total_frames = len(audio)
@@ -308,5 +337,3 @@ def diviser_audio(audio, samplerate=16000, duree_max=30):
         segments.append(segment)
 
     return segments
-
-
