@@ -1,8 +1,9 @@
 # app.py
 import os
 import torch
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import soundfile as sf
 import numpy as np
@@ -15,7 +16,9 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from database import SessionLocal, init_db
 from models import User, Upload
-from datetime import datetime
+from schemas import UserCreate, UserLogin, Token, UploadHistoryResponse
+from auth import ACCESS_TOKEN_EXPIRE_MINUTES, verify_password, get_password_hash, create_access_token, decode_access_token
+from datetime import timedelta
 import uuid
 from werkzeug.utils import secure_filename  # For filename sanitization
 import logging
@@ -50,6 +53,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# OAuth2 scheme for token extraction
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Authentication dependency
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    token_data = decode_access_token(token)
+    if token_data is None or token_data.username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.username == token_data.username).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 # Device configuration for PyTorch and Transformers pipeline
 if torch.cuda.is_available():
@@ -95,28 +119,65 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 # Thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=4)  # Adjust as needed
 
+@app.post("/register/", response_model=Token)
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    """
+    Endpoint to register a new user.
+    """
+    logger.info(f"Attempting to register user: {user.username}")
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        logger.warning(f"User registration failed: {user.username} already exists.")
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    hashed_password = get_password_hash(user.password)
+    new_user = User(username=user.username, hashed_password=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    logger.info(f"User registered successfully: {user.username}")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": new_user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/token/", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """
+    Endpoint to authenticate a user and return a JWT token.
+    """
+    logger.info(f"User attempting to login: {form_data.username}")
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user:
+        logger.warning(f"Login failed: {form_data.username} does not exist.")
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    
+    if not verify_password(form_data.password, user.hashed_password):
+        logger.warning(f"Login failed: Incorrect password for user {form_data.username}.")
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    logger.info(f"User logged in successfully: {form_data.username}")
+    return {"access_token": access_token, "token_type": "bearer"}
+
 @app.post("/upload-audio/")
 async def upload_audio(
-    user_id: int = Form(...), 
-    file: UploadFile = File(...), 
+    user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
     """
-    logger.info(f"Received file: {file.filename}, content_type: {file.content_type}, from user_id: {user_id}")
+    logger.info(f"User {user.username} is uploading file: {file.filename}")
     
     # Sanitize the original filename
     original_filename = secure_filename(file.filename)
-    
-    # Check if user exists, else create
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        user = User(id=user_id, username=f"user_{user_id}")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        logger.info(f"Created new user with id: {user_id}")
     
     # Extract the main content type
     content_type_main = file.content_type.split(';')[0].strip()
@@ -134,7 +195,7 @@ async def upload_audio(
     
     # Check if the type is supported
     if content_type_main not in supported_types:
-        logger.warning("Unsupported file type.")
+        logger.warning(f"Unsupported file type: {content_type_main}")
         raise HTTPException(status_code=400, detail="Unsupported audio file format.")
     
     # Save the uploaded audio file
@@ -238,13 +299,13 @@ def process_transcription(file_path):
     return transcription_complete
 
 @app.get("/download-transcription/{upload_id}")
-async def download_transcription(upload_id: int, db: Session = Depends(get_db)):
+async def download_transcription(upload_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Endpoint to download the transcription of a specific upload.
     """
-    upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
+    upload_record = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
     if not upload_record:
-        logger.warning(f"Transcription record not found for upload_id: {upload_id}")
+        logger.warning(f"Transcription record not found for upload_id: {upload_id} and user: {current_user.username}")
         raise HTTPException(status_code=404, detail="Transcription file not found.")
     
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
@@ -256,13 +317,13 @@ async def download_transcription(upload_id: int, db: Session = Depends(get_db)):
     return FileResponse(transcription_path, media_type='text/plain', filename=upload_record.transcription_filename)
 
 @app.get("/download-audio/{upload_id}")
-async def download_audio(upload_id: int, db: Session = Depends(get_db)):
+async def download_audio(upload_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Endpoint to download the original audio file of a specific upload.
     """
-    upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
+    upload_record = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
     if not upload_record:
-        logger.warning(f"Audio record not found for upload_id: {upload_id}")
+        logger.warning(f"Audio record not found for upload_id: {upload_id} and user: {current_user.username}")
         raise HTTPException(status_code=404, detail="Audio file not found.")
     
     audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
@@ -273,17 +334,12 @@ async def download_audio(upload_id: int, db: Session = Depends(get_db)):
     logger.info(f"Audio file found: {upload_record.filename}")
     return FileResponse(audio_path, media_type='audio/wav', filename=upload_record.filename)
 
-@app.get("/history/{user_id}")
-async def get_history(user_id: int, db: Session = Depends(get_db)):
+@app.get("/history/", response_model=UploadHistoryResponse)
+async def get_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
-    Endpoint to retrieve the upload history of a user.
+    Endpoint to retrieve the upload history of the authenticated user.
     """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        logger.warning(f"User not found with id: {user_id}")
-        raise HTTPException(status_code=404, detail="User not found.")
-    
-    uploads = db.query(Upload).filter(Upload.user_id == user_id).all()
+    uploads = db.query(Upload).filter(Upload.user_id == current_user.id).all()
     history = []
     for upload in uploads:
         history.append({
@@ -293,17 +349,17 @@ async def get_history(user_id: int, db: Session = Depends(get_db)):
             "upload_time": upload.upload_time.isoformat()
         })
     
-    logger.info(f"Retrieved history for user_id: {user_id}, total uploads: {len(history)}")
-    return JSONResponse(content={"history": history})
+    logger.info(f"Retrieved history for user: {current_user.username}, total uploads: {len(history)}")
+    return {"history": history}
 
 @app.get("/get-transcription/{upload_id}")
-async def get_transcription(upload_id: int, db: Session = Depends(get_db)):
+async def get_transcription(upload_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Endpoint to retrieve the transcription text of a specific upload.
     """
-    upload_record = db.query(Upload).filter(Upload.id == upload_id).first()
+    upload_record = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
     if not upload_record:
-        logger.warning(f"Transcription record not found for upload_id: {upload_id}")
+        logger.warning(f"Transcription record not found for upload_id: {upload_id} and user: {current_user.username}")
         raise HTTPException(status_code=404, detail="Transcription not found.")
     
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)

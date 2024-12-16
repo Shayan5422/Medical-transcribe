@@ -10,15 +10,16 @@ class User(Base):
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)  # Password storage
     uploads = relationship("Upload", back_populates="owner")
 
 class Upload(Base):
     __tablename__ = 'uploads'
     
     id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, unique=True, index=True)
-    transcription_filename = Column(String, unique=True, index=True)
+    filename = Column(String, unique=True, index=True, nullable=False)
+    transcription_filename = Column(String, unique=True, index=True, nullable=False)
     upload_time = Column(DateTime, default=datetime.datetime.utcnow)
     user_id = Column(Integer, ForeignKey('users.id'))
     

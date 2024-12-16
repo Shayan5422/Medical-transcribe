@@ -1,14 +1,14 @@
+// src/app/app.component.ts
 import { Component } from '@angular/core';
-import { TranscriberComponent } from './transcriber/transcriber.component';
-import { HttpClientModule } from '@angular/common/http';
+import { CommonModule } from '@angular/common';
+import { RouterModule } from '@angular/router';
+import { HttpClientModule } from '@angular/common/http'; // Already provided globally
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [TranscriberComponent, HttpClientModule],
+  imports: [CommonModule, RouterModule],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
-export class AppComponent {
-  title = 'audio-transcriber';
-}
+export class AppComponent {}
