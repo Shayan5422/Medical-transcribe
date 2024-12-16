@@ -1,0 +1,51 @@
+/* اضافه کردن سایه به نوار ناوبری */
+.navbar {
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .navbar .navbar-toggler {
+    border-color: #ddd;
+  }
+  
+  .navbar-nav .nav-link {
+    font-weight: 500;
+    padding: 8px 15px;
+  }
+  
+  .navbar-nav .nav-link.active {
+    background-color: #007bff;
+    color: #fff;
+  }
+  
+  .navbar-nav .nav-item {
+    margin-right: 15px;
+  }
+  
+  .navbar-nav .nav-link:hover {
+    background-color: #f1f1f1;
+  }
+  
+  .navbar-brand {
+    font-weight: bold;
+  }
+  
+  .navbar-nav .nav-link.text-muted {
+    font-style: italic;
+    color: #6c757d;
+  }
+  
+  .navbar-toggler-icon {
+    background-color: #007bff;
+  }
+  
+  /* بهینه‌سازی برای نمایش در موبایل */
+  @media (max-width: 768px) {
+    .navbar-nav {
+      text-align: center;
+    }
+  
+    .navbar-nav .nav-item {
+      margin-right: 0;
+    }
+  }
+  
