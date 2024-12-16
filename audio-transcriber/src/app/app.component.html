@@ -1,4 +1,3 @@
-<!-- src/app/app.component.html -->
 <nav class="navbar navbar-expand-lg navbar-light bg-light">
     <a class="navbar-brand" href="#">Transcriber App</a>
     <div class="collapse navbar-collapse">
@@ -6,11 +5,17 @@
         <li class="nav-item">
           <a class="nav-link" routerLink="/transcriber">Transcriber</a>
         </li>
-        <li class="nav-item">
+        <li class="nav-item" *ngIf="!isAuthenticated">
           <a class="nav-link" routerLink="/login">Login</a>
         </li>
-        <li class="nav-item">
+        <li class="nav-item" *ngIf="!isAuthenticated">
           <a class="nav-link" routerLink="/register">Register</a>
+        </li>
+        <li class="nav-item" *ngIf="isAuthenticated">
+          <a class="nav-link" (click)="logout()">Logout</a>
+        </li>
+        <li class="nav-item" *ngIf="isAuthenticated">
+          <span class="nav-link">Welcome, {{ username }}</span>
         </li>
       </ul>
     </div>

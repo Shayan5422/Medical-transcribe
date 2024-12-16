@@ -29,13 +29,12 @@ export class RegisterComponent implements OnInit {
       this.successMessage = '';
       return;
     }
-
+  
     const registerData = { username: this.username, password: this.password };
     this.http.post<any>('http://127.0.0.1:8000/register', registerData).subscribe(
       (response) => {
         this.successMessage = 'Registration successful. You can now log in.';
         this.errorMessage = '';
-        // Optionally, redirect to login page
         this.router.navigate(['/login']);
       },
       (error) => {

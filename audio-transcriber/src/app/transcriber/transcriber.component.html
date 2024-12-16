@@ -49,7 +49,29 @@
         </div>
       </div>
 
-      <!-- Section d'affichage de la transcription sélectionnée -->
+      <!-- Message de chargement pendant la transcription -->
+      <div *ngIf="isTranscribing" class="alert alert-info">
+        Veuillez patienter, en cours de transcription...
+      </div>
+
+      <!-- Affichage direct de la transcription -->
+      <div class="card mb-4" *ngIf="transcription">
+        <div class="card-body">
+          <h5 class="card-title">Transcription</h5>
+          <p class="card-text">{{ transcription }}</p>
+          <button class="btn btn-outline-secondary me-2" (click)="downloadTranscription()">
+            Télécharger la Transcription
+          </button>
+          <button class="btn btn-primary me-2" (click)="downloadAudioFile(selectedUploadId!)">
+            Télécharger l'Audio
+          </button>
+          <button class="btn btn-secondary" (click)="downloadTranscriptionAsPDF(selectedUploadId!)">
+            Télécharger en PDF
+          </button>
+        </div>
+      </div>
+
+      <!-- Section d'affichage de la transcription sélectionnée depuis l'historique -->
       <div class="card mb-4" *ngIf="selectedTranscription">
         <div class="card-body">
           <h5 class="card-title">Transcription Sélectionnée</h5>

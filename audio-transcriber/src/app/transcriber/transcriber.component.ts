@@ -1,7 +1,7 @@
 // src/app/transcriber/transcriber.component.ts
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms'; // Import FormsModule for ngModel
+import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngModel
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { jsPDF } from 'jspdf';
@@ -27,7 +27,7 @@ export class TranscriberComponent implements OnInit {
   isTranscribing: boolean = false;
   mediaRecorder: MediaRecorder | null = null;
   audioChunks: Blob[] = [];
-  selectedFile: File | null = null; // Selected file
+  selectedFile: File | null = null; // Fichier sélectionné
   history: UploadHistory[] = [];
   token: string | null = null;
   selectedUploadId: number | null = null;
@@ -37,37 +37,37 @@ export class TranscriberComponent implements OnInit {
 
   ngOnInit(): void {
     this.token = localStorage.getItem('token');
-    console.log('Token retrieved:', this.token);
+    console.log('Token récupéré :', this.token);
     if (this.token) {
       this.fetchHistory();
     } else {
-      // If not logged in, redirect to login
-      console.log('No token found, redirecting to login.');
+      // Si non connecté, rediriger vers la page de connexion
+      console.log('Aucun token trouvé, redirection vers la page de connexion.');
       this.router.navigate(['/login']);
     }
   }
 
-  // Handle file selection
+  // Gérer la sélection de fichier
   onFileSelected(event: any): void {
     const file: File = event.target.files[0];
     if (file) {
       this.selectedFile = file;
-      this.transcription = null; // Reset previous transcription
-      this.transcriptionFile = null; // Reset previous transcription file
-      console.log('Selected file:', file);
+      this.transcription = null; // Réinitialiser la transcription précédente
+      this.transcriptionFile = null; // Réinitialiser le fichier de transcription précédent
+      console.log('Fichier sélectionné :', file);
     }
   }
 
-  // Upload the selected file
+  // Télécharger le fichier sélectionné
   uploadSelectedFile(): void {
     if (this.selectedFile) {
       this.uploadAudio(this.selectedFile);
     } else {
-      alert('Please select an audio file before uploading.');
+      alert('Veuillez sélectionner un fichier audio avant de le télécharger.');
     }
   }
 
-  // Upload audio file to the server
+  // Télécharger le fichier audio vers le serveur
   uploadAudio(file: File): void {
     const formData = new FormData();
     formData.append('file', file);
@@ -76,34 +76,34 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
 
-    console.log('Uploading file:', file);
-    console.log('File type:', file.type);
+    console.log('Téléchargement du fichier :', file);
+    console.log('Type de fichier :', file.type);
 
-    this.isTranscribing = true; // Start transcription
+    this.isTranscribing = true; // Début de la transcription
 
     this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
       response => {
-        console.log('Transcription response:', response);
+        console.log('Réponse de transcription :', response);
         this.transcription = response.transcription;
         this.transcriptionFile = response.transcription_file;
-        this.isTranscribing = false; // End transcription
-        alert('Transcription successful!');
-        console.log('Transcription set:', this.transcription);
-        this.fetchHistory(); // Refresh history after new upload
+        this.isTranscribing = false; // Fin de la transcription
+        alert('Transcription réussie !');
+        console.log('Transcription définie :', this.transcription);
+        this.fetchHistory(); // Rafraîchir l'historique après un nouveau téléchargement
       },
       (error: HttpErrorResponse) => {
-        console.error('Error uploading audio file:', error);
+        console.error('Erreur lors du téléchargement du fichier audio :', error);
         if (error.error && error.error.detail) {
-          alert(`Error: ${error.error.detail}`);
+          alert(`Erreur : ${error.error.detail}`);
         } else {
-          alert('Error uploading audio file.');
+          alert('Erreur lors du téléchargement du fichier audio.');
         }
-        this.isTranscribing = false; // End transcription on error
+        this.isTranscribing = false; // Fin de la transcription en cas d'erreur
       }
     );
   }
 
-  // Start audio recording
+  // Démarrer l'enregistrement audio
   startRecording(): void {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
@@ -125,43 +125,43 @@ export class TranscriberComponent implements OnInit {
           this.audioChunks = [];
           this.mediaRecorder.start();
           this.isRecording = true;
-          console.log('Recording started.');
+          console.log('Enregistrement démarré.');
 
           this.mediaRecorder.ondataavailable = event => {
             if (event.data.size > 0) {
               this.audioChunks.push(event.data);
-              console.log('Data available:', event.data);
+              console.log('Données disponibles :', event.data);
             }
           };
 
           this.mediaRecorder.onstop = () => {
             const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
-            console.log('MediaRecorder MIME type:', mimeType);
+            console.log('Type MIME du MediaRecorder :', mimeType);
             const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-            const audioFile = new File([audioBlob], 'recording.webm', { type: mimeType });
-            console.log('Recorded audio file:', audioFile);
+            const audioFile = new File([audioBlob], 'enregistrement.webm', { type: mimeType });
+            console.log('Fichier audio enregistré :', audioFile);
             this.uploadAudio(audioFile);
           };
         })
         .catch(err => {
-          console.error('Error accessing microphone:', err);
-          alert('Unable to access the microphone.');
+          console.error('Erreur lors de l\'accès au microphone :', err);
+          alert('Impossible d\'accéder au microphone.');
         });
     } else {
-      alert('Your browser does not support audio recording.');
+      alert('Votre navigateur ne prend pas en charge l\'enregistrement audio.');
     }
   }
 
-  // Stop audio recording
+  // Arrêter l'enregistrement audio
   stopRecording(): void {
     if (this.mediaRecorder) {
       this.mediaRecorder.stop();
       this.isRecording = false;
-      console.log('Recording stopped.');
+      console.log('Enregistrement arrêté.');
     }
   }
 
-  // Download transcription as text file
+  // Télécharger la transcription en tant que fichier texte
   downloadTranscription(): void {
     if (this.transcription) {
       const blob = new Blob([this.transcription], { type: 'text/plain' });
@@ -171,11 +171,11 @@ export class TranscriberComponent implements OnInit {
       a.download = 'transcription.txt';
       a.click();
       window.URL.revokeObjectURL(url);
-      console.log('Transcription downloaded as text file.');
+      console.log('Transcription téléchargée en tant que fichier texte.');
     }
   }
 
-  // Download transcription file from server
+  // Télécharger le fichier de transcription depuis le serveur
   downloadTranscriptionFile(upload_id: number): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
@@ -189,14 +189,14 @@ export class TranscriberComponent implements OnInit {
       a.download = `transcription_${upload_id}.txt`;
       a.click();
       URL.revokeObjectURL(objectUrl);
-      console.log(`Transcription file transcription_${upload_id}.txt téléchargé.`);
+      console.log(`Fichier de transcription transcription_${upload_id}.txt téléchargé.`);
     }, error => {
-      console.error('Error downloading transcription file:', error);
-      alert('Error downloading transcription file.');
+      console.error('Erreur lors du téléchargement du fichier de transcription :', error);
+      alert('Erreur lors du téléchargement du fichier de transcription.');
     });
   }
 
-  // Download audio file from server
+  // Télécharger le fichier audio depuis le serveur
   downloadAudioFile(upload_id: number): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
@@ -212,28 +212,28 @@ export class TranscriberComponent implements OnInit {
       URL.revokeObjectURL(objectUrl);
       console.log(`Fichier audio audio_${upload_id}.wav téléchargé.`);
     }, error => {
-      console.error('Error downloading audio file:', error);
-      alert('Error downloading audio file.');
+      console.error('Erreur lors du téléchargement du fichier audio :', error);
+      alert('Erreur lors du téléchargement du fichier audio.');
     });
   }
 
-  // Download transcription as PDF (Optional)
+  // Télécharger la transcription en tant que PDF (Optionnel)
   downloadTranscriptionAsPDF(upload_id: number): void {
     if (this.selectedTranscription) {
       const doc = new jsPDF();
       const lines = doc.splitTextToSize(this.selectedTranscription, 180);
       doc.text(lines, 10, 10);
       doc.save(`transcription_${upload_id}.pdf`);
-      console.log(`Transcription téléchargée en tant que PDF: transcription_${upload_id}.pdf`);
+      console.log(`Transcription téléchargée en tant que PDF : transcription_${upload_id}.pdf`);
     } else {
-      alert('No transcription selected for download.');
+      alert('Aucune transcription sélectionnée pour le téléchargement.');
     }
   }
 
-  // Select an upload entry and display its transcription
+  // Sélectionner une entrée d'upload et afficher sa transcription
   selectUpload(upload_id: number): void {
     this.selectedUploadId = upload_id;
-    console.log(`Sélection de l'upload ID: ${upload_id}`);
+    console.log(`Sélection de l'upload ID : ${upload_id}`);
 
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
@@ -241,18 +241,18 @@ export class TranscriberComponent implements OnInit {
 
     this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
-        console.log('Retrieved transcription:', response.transcription);
+        console.log('Transcription récupérée :', response.transcription);
         this.selectedTranscription = response.transcription;
-        console.log('selectedTranscription set to:', this.selectedTranscription);
+        console.log('selectedTranscription définie sur :', this.selectedTranscription);
       },
       (error: HttpErrorResponse) => {
-        console.error('Error retrieving transcription:', error);
-        alert('Error retrieving transcription.');
+        console.error('Erreur lors de la récupération de la transcription :', error);
+        alert('Erreur lors de la récupération de la transcription.');
       }
     );
   }
 
-  // Fetch user-specific upload history
+  // Récupérer l'historique des uploads spécifiques à l'utilisateur
   fetchHistory(): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
@@ -260,12 +260,12 @@ export class TranscriberComponent implements OnInit {
   
     this.http.get<any>('http://127.0.0.1:8000/history/', { headers }).subscribe(
       response => {
-        console.log('History response:', response);
+        console.log('Réponse de l\'historique :', response);
         this.history = response.history; // Assurez-vous que 'history' est une propriété définie dans le composant
-        console.log('Historique mis à jour:', this.history);
+        console.log('Historique mis à jour :', this.history);
       },
       (error: HttpErrorResponse) => {
-        console.error('Error fetching history:', error);
+        console.error('Erreur lors de la récupération de l\'historique :', error);
         alert('Erreur lors de la récupération de l\'historique.');
       }
     );
