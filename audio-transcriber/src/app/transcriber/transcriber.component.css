@@ -1,0 +1,42 @@
+/* transcriber.component.css */
+
+/* Styles pour la barre latérale */
+#sidebar {
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding-top: 60px;
+  overflow-y: auto;
+  width: 250px; /* Ajustez la largeur selon vos besoins */
+}
+
+main {
+  margin-left: 250px; /* Doit correspondre à la largeur de la barre latérale */
+}
+
+@media (max-width: 768px) {
+  #sidebar {
+    display: none;
+  }
+  main {
+    margin-left: 0;
+  }
+}
+
+/* Ajustements supplémentaires pour une meilleure apparence */
+.nav-link {
+  cursor: pointer;
+}
+
+.nav-link:hover {
+  background-color: #e9ecef;
+}
+
+.btn-sm {
+  margin-top: 5px;
+}
+
+.mt-4 {
+  margin-top: 1.5rem;
+}

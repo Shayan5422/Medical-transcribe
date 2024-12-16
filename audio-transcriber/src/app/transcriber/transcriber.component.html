@@ -1,0 +1,69 @@
+<!-- transcriber.component.html -->
+<div class="container-fluid">
+  <div class="row">
+    <!-- Barre latérale de l'historique -->
+    <nav id="sidebar" class="col-md-3 col-lg-2 d-md-block bg-light sidebar collapse">
+      <div class="position-sticky pt-3">
+        <h5 class="px-3">Historique des Transcriptions</h5>
+        <ul class="nav flex-column">
+          <li class="nav-item" *ngFor="let record of history">
+            <a class="nav-link" href="#" (click)="selectUpload(record.upload_id)">
+              <strong>ID:</strong> {{ record.upload_id }}<br>
+              <strong>Fichier:</strong> {{ record.filename }}<br>
+              <strong>Heure:</strong> {{ record.upload_time | date:'short' }}
+            </a>
+            <hr>
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <!-- Section principale du contenu -->
+    <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
+      <div class="pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">Transcripteur Audio</h1>
+      </div>
+
+      <!-- Section de Téléchargement de Fichier -->
+      <div class="card mb-4">
+        <div class="card-body">
+          <h5 class="card-title">Télécharger un Fichier Audio</h5>
+          <input type="file" (change)="onFileSelected($event)" accept="audio/*" class="form-control mb-2" />
+          <button class="btn btn-success" (click)="uploadSelectedFile()" [disabled]="!selectedFile || isTranscribing">
+            Télécharger et Transcrire
+          </button>
+        </div>
+      </div>
+
+      <!-- Section d'Enregistrement Audio -->
+      <div class="card mb-4">
+        <div class="card-body">
+          <h5 class="card-title">Enregistrer de l'Audio</h5>
+          <button class="btn btn-primary me-2" (click)="startRecording()" [disabled]="isRecording">
+            Commencer l'Enregistrement
+          </button>
+          <button class="btn btn-danger" (click)="stopRecording()" [disabled]="!isRecording">
+            Arrêter l'Enregistrement
+          </button>
+        </div>
+      </div>
+
+      <!-- Section d'Affichage de la Transcription Sélectionnée -->
+      <div class="card mb-4" *ngIf="selectedTranscription">
+        <div class="card-body">
+          <h5 class="card-title">Transcription Sélectionnée</h5>
+          <p class="card-text">{{ selectedTranscription }}</p>
+          <button class="btn btn-outline-secondary me-2" (click)="downloadTranscriptionFile(selectedUploadId!)">
+            Télécharger Transcription
+          </button>
+          <button class="btn btn-primary me-2" (click)="downloadAudioFile(selectedUploadId!)">
+            Télécharger Audio
+          </button>
+          <button class="btn btn-secondary" (click)="downloadTranscriptionAsPDF(selectedUploadId!)">
+            Télécharger en PDF
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
