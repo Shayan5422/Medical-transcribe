@@ -79,37 +79,42 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 if torch.cuda.is_available():
     torch_device = "cuda:0"
     pipeline_device = 0  # GPU index for Transformers pipeline
+    torch_dtype = torch.float16
     logger.info("Using CUDA for both PyTorch and Transformers pipeline.")
 elif torch.backends.mps.is_available():
     torch_device = "mps"
     pipeline_device = -1  # Transformers pipeline does not support MPS
+    torch_dtype = torch.float32
     logger.info("Using MPS for PyTorch and CPU for Transformers pipeline.")
 else:
     torch_device = "cpu"
     pipeline_device = -1  # CPU for Transformers pipeline
+    torch_dtype = torch.float32
     logger.info("Using CPU for both PyTorch and Transformers pipeline.")
 
-# Model identifier
-model_id = "openai/whisper-large-v3"
+# Model identifier for Whisper large-v3-turbo
+model_id = "openai/whisper-large-v3-turbo"
 
 # Load model and processor
 logger.info("Loading model and processor...")
 model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id, torch_dtype=torch.float16 if torch_device.startswith("cuda") else torch.float32, 
-    low_cpu_mem_usage=True, use_safetensors=True
+    model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
 )
 model.to(torch_device)
 processor = AutoProcessor.from_pretrained(model_id)
 logger.info("Model and processor loaded.")
 
-# Create ASR pipeline
+# Create ASR pipeline with chunked processing
 asr_pipeline = pipeline(
     "automatic-speech-recognition",
     model=model,
     tokenizer=processor.tokenizer,
     feature_extractor=processor.feature_extractor,
+    chunk_length_s=30,  # Optimal chunk length for large-v3-turbo
+    batch_size=16,      # Adjust based on your device's capabilities
+    torch_dtype=torch_dtype,
     device=pipeline_device,
-    generate_kwargs={"language": "french"}
+    generate_kwargs={"language": "french"}  # تنظیمات پیش‌فرض زبان
 )
 
 # Directory to store audio files
@@ -280,7 +285,7 @@ def process_transcription(file_path):
             raise e
     
     # Divide audio into 30-second segments
-    segments = diviser_audio(audio_data, samplerate, duree_max=30)
+    segments = diviser_audio(audio_data, samplerate, duree_max=29)
     logger.info(f"Audio divided into {len(segments)} segment(s).")
     
     transcription_complete = ""
@@ -372,7 +377,7 @@ async def get_transcription(upload_id: int, current_user: User = Depends(get_cur
     
     return {"transcription": transcription}
 
-def diviser_audio(audio, samplerate=16000, duree_max=30):
+def diviser_audio(audio, samplerate=16000, duree_max=29):
     """
     Divides audio into segments with a maximum duration.
     
