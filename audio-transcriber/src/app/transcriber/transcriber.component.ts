@@ -96,7 +96,7 @@ selectUpload(upload_id: number): void {
     'Authorization': `Bearer ${this.token}`
   });
 
-  this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
+  this.http.get<any>(`http://localhost:8000/get-transcription/${upload_id}`, { headers }).subscribe(
     response => {
       console.log('Transcription récupérée :', response.transcription);
       this.ngZone.run(() => {
@@ -130,7 +130,7 @@ uploadAudio(file: File): void {
     this.selectedUploadId = null; // Réinitialiser l'ID sélectionné
   });
 
-  this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
+  this.http.post<any>('http://localhost:8000/upload-audio/', formData, { headers }).subscribe(
     response => {
       console.log('Réponse de transcription :', response);
       this.ngZone.run(() => {
@@ -246,7 +246,7 @@ uploadAudio(file: File): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    const url = `http://127.0.0.1:8000/download-transcription/${upload_id}`;
+    const url = `http://localhost:8000/download-transcription/${upload_id}`;
     this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
       const a = document.createElement('a');
       const objectUrl = URL.createObjectURL(blob);
@@ -267,7 +267,7 @@ uploadAudio(file: File): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    const url = `http://127.0.0.1:8000/download-audio/${upload_id}`;
+    const url = `http://localhost:8000/download-audio/${upload_id}`;
     this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
       const a = document.createElement('a');
       const objectUrl = URL.createObjectURL(blob);
@@ -303,7 +303,7 @@ uploadAudio(file: File): void {
       'Authorization': `Bearer ${this.token}`
     });
   
-    this.http.get<any>('http://127.0.0.1:8000/history/', { headers }).subscribe(
+    this.http.get<any>('http://localhost:8000/history/', { headers }).subscribe(
       response => {
         console.log('Réponse de l\'historique :', response);
         this.ngZone.run(() => {
