@@ -2,3 +2,28 @@ aside {
   max-height: calc(100vh - 4rem); /* Ajustez selon la hauteur du header */
   overflow-y: auto;
 }
+/* Optionnel : Ajuster la taille des icônes et du texte */
+.icon-button {
+  width: 5rem; /* 80px */
+  height: 5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  transition: background-color 0.2s;
+}
+
+.icon-button svg {
+  width: 2.5rem; /* 40px */
+  height: 2.5rem;
+}
+
+.icon-button:hover {
+  background-color: rgb(229 231 235); /* Equivalent Tailwind bg-gray-300 */
+}
+
+.icon-button span {
+  font-size: 0.875rem; /* text-sm */
+  margin-top: 0.25rem; /* 4px */
+}

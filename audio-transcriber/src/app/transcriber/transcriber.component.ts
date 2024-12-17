@@ -86,48 +86,75 @@ export class TranscriberComponent implements OnInit {
   }
 
   // Télécharger le fichier audio vers le serveur
-  uploadAudio(file: File): void {
-    const formData = new FormData();
-    formData.append('file', file);
+  // Dans la méthode selectUpload
+selectUpload(upload_id: number): void {
+  this.selectedUploadId = upload_id;
+  this.transcription = null; // Réinitialiser la transcription courante
+  console.log(`Sélection de l'upload ID : ${upload_id}`);
 
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
+  const headers = new HttpHeaders({
+    'Authorization': `Bearer ${this.token}`
+  });
 
-    console.log('Téléchargement du fichier :', file);
-    console.log('Type de fichier :', file.type);
+  this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
+    response => {
+      console.log('Transcription récupérée :', response.transcription);
+      this.ngZone.run(() => {
+        this.selectedTranscription = response.transcription;
+      });
+      console.log('selectedTranscription définie sur :', this.selectedTranscription);
+    },
+    (error: HttpErrorResponse) => {
+      console.error('Erreur lors de la récupération de la transcription :', error);
+      alert('Erreur lors de la récupération de la transcription.');
+    }
+  );
+}
 
-    // Utiliser NgZone pour s'assurer que les changements sont détectés
-    this.ngZone.run(() => {
-      this.isTranscribing = true; // Début de la transcription
-      this.transcription = null; // Réinitialiser la transcription précédente
-    });
+// Dans la méthode uploadAudio
+uploadAudio(file: File): void {
+  const formData = new FormData();
+  formData.append('file', file);
 
-    this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
-      response => {
-        console.log('Réponse de transcription :', response);
-        this.ngZone.run(() => {
-          this.transcription = response.transcription;
-          this.transcriptionFile = response.transcription_file;
-          this.isTranscribing = false; // Fin de la transcription
-        });
-        alert('Transcription réussie !');
-        console.log('Transcription définie :', this.transcription);
-        this.fetchHistory(); // Rafraîchir l'historique après un nouveau téléchargement
-      },
-      (error: HttpErrorResponse) => {
-        console.error('Erreur lors du téléchargement du fichier audio :', error);
-        this.ngZone.run(() => {
-          if (error.error && error.error.detail) {
-            alert(`Erreur : ${error.error.detail}`);
-          } else {
-            alert('Erreur lors du téléchargement du fichier audio.');
-          }
-          this.isTranscribing = false; // Fin de la transcription en cas d'erreur
-        });
-      }
-    );
-  }
+  const headers = new HttpHeaders({
+    'Authorization': `Bearer ${this.token}`
+  });
+
+  console.log('Téléchargement du fichier :', file);
+  console.log('Type de fichier :', file.type);
+
+  this.ngZone.run(() => {
+    this.isTranscribing = true;
+    this.transcription = null;
+    this.selectedTranscription = null; // Réinitialiser la transcription sélectionnée
+    this.selectedUploadId = null; // Réinitialiser l'ID sélectionné
+  });
+
+  this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
+    response => {
+      console.log('Réponse de transcription :', response);
+      this.ngZone.run(() => {
+        this.transcription = response.transcription;
+        this.transcriptionFile = response.transcription_file;
+        this.isTranscribing = false;
+      });
+      alert('Transcription réussie !');
+      console.log('Transcription définie :', this.transcription);
+      this.fetchHistory();
+    },
+    (error: HttpErrorResponse) => {
+      console.error('Erreur lors du téléchargement du fichier audio :', error);
+      this.ngZone.run(() => {
+        if (error.error && error.error.detail) {
+          alert(`Erreur : ${error.error.detail}`);
+        } else {
+          alert('Erreur lors du téléchargement du fichier audio.');
+        }
+        this.isTranscribing = false;
+      });
+    }
+  );
+}
 
   // Démarrer l'enregistrement audio
   startRecording(): void {
@@ -268,29 +295,7 @@ export class TranscriberComponent implements OnInit {
     }
   }
 
-  // Sélectionner une entrée d'upload et afficher sa transcription
-  selectUpload(upload_id: number): void {
-    this.selectedUploadId = upload_id;
-    console.log(`Sélection de l'upload ID : ${upload_id}`);
-
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
-
-    this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
-      response => {
-        console.log('Transcription récupérée :', response.transcription);
-        this.ngZone.run(() => {
-          this.selectedTranscription = response.transcription;
-        });
-        console.log('selectedTranscription définie sur :', this.selectedTranscription);
-      },
-      (error: HttpErrorResponse) => {
-        console.error('Erreur lors de la récupération de la transcription :', error);
-        alert('Erreur lors de la récupération de la transcription.');
-      }
-    );
-  }
+  
 
   // Récupérer l'historique des uploads spécifiques à l'utilisateur
   fetchHistory(): void {
