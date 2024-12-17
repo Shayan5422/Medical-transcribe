@@ -1,5 +1,5 @@
 export const environment = {
     production: false,
-    apiUrl: 'http://127.0.0.1:8000'  // Local server URL
+    apiUrl: 'http://51.15.224.218:8000'  // Local server URL
   };
   
