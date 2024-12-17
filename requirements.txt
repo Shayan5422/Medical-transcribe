@@ -1,9 +1,32 @@
-fastapi
-torch
-transformers
-soundfile
-numpy
-mathlib
-pydub
-librosa
-uvicorn
+# Core Framework
+fastapi==0.95.1
+uvicorn[standard]==0.22.0
+
+# Machine Learning and NLP
+torch==2.0.1
+transformers==4.30.2
+
+# Audio Processing
+soundfile==0.12.1
+librosa==0.10.0.post2
+pydub==0.25.1
+
+# Numerical Computation
+numpy==1.24.4
+
+# Database
+SQLAlchemy==2.0.16
+
+# Authentication and Security
+passlib==1.7.4
+python-jose==3.4.0
+
+# Utility Libraries
+werkzeug==2.3.6
+
+# Optional: If you're using additional FastAPI features or middleware
+# Install CORS middleware if not already included with FastAPI
+# (FastAPI includes CORSMiddleware by default)
+
+# To install all dependencies, you can use:
+# pip install -r requirements.txt
