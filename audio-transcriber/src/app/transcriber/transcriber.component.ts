@@ -1,5 +1,4 @@
-// src/app/transcriber/transcriber.component.ts
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngModel
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
@@ -26,14 +25,19 @@ export class TranscriberComponent implements OnInit {
   isRecording: boolean = false;
   isTranscribing: boolean = false;
   mediaRecorder: MediaRecorder | null = null;
+  mediaStream: MediaStream | null = null; // Ajouté pour gérer le flux média
   audioChunks: Blob[] = [];
   selectedFile: File | null = null; // Fichier sélectionné
   history: UploadHistory[] = [];
   token: string | null = null;
   selectedUploadId: number | null = null;
   selectedTranscription: string | null = null;
-
-  constructor(private http: HttpClient, private router: Router) {}
+  currentTheme: string = 'light';
+  constructor(
+    private http: HttpClient,
+    private router: Router,
+    private ngZone: NgZone // Injecter NgZone
+  ) {}
 
   ngOnInit(): void {
     this.token = localStorage.getItem('token');
@@ -41,10 +45,24 @@ export class TranscriberComponent implements OnInit {
     if (this.token) {
       this.fetchHistory();
     } else {
-      // Si non connecté, rediriger vers la page de connexion
       console.log('Aucun token trouvé, redirection vers la page de connexion.');
       this.router.navigate(['/login']);
     }
+
+    
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+      this.currentTheme = savedTheme;
+    }
+    document.documentElement.setAttribute('data-theme', this.currentTheme);
+  }
+
+  toggleTheme(): void {
+    this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
+    // Mettre à jour l'attribut data-theme
+    document.documentElement.setAttribute('data-theme', this.currentTheme);
+    // Sauvegarde du thème dans le localStorage (optionnel)
+    localStorage.setItem('theme', this.currentTheme);
   }
 
   // Gérer la sélection de fichier
@@ -79,26 +97,34 @@ export class TranscriberComponent implements OnInit {
     console.log('Téléchargement du fichier :', file);
     console.log('Type de fichier :', file.type);
 
-    this.isTranscribing = true; // Début de la transcription
+    // Utiliser NgZone pour s'assurer que les changements sont détectés
+    this.ngZone.run(() => {
+      this.isTranscribing = true; // Début de la transcription
+      this.transcription = null; // Réinitialiser la transcription précédente
+    });
 
     this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
       response => {
         console.log('Réponse de transcription :', response);
-        this.transcription = response.transcription;
-        this.transcriptionFile = response.transcription_file;
-        this.isTranscribing = false; // Fin de la transcription
+        this.ngZone.run(() => {
+          this.transcription = response.transcription;
+          this.transcriptionFile = response.transcription_file;
+          this.isTranscribing = false; // Fin de la transcription
+        });
         alert('Transcription réussie !');
         console.log('Transcription définie :', this.transcription);
         this.fetchHistory(); // Rafraîchir l'historique après un nouveau téléchargement
       },
       (error: HttpErrorResponse) => {
         console.error('Erreur lors du téléchargement du fichier audio :', error);
-        if (error.error && error.error.detail) {
-          alert(`Erreur : ${error.error.detail}`);
-        } else {
-          alert('Erreur lors du téléchargement du fichier audio.');
-        }
-        this.isTranscribing = false; // Fin de la transcription en cas d'erreur
+        this.ngZone.run(() => {
+          if (error.error && error.error.detail) {
+            alert(`Erreur : ${error.error.detail}`);
+          } else {
+            alert('Erreur lors du téléchargement du fichier audio.');
+          }
+          this.isTranscribing = false; // Fin de la transcription en cas d'erreur
+        });
       }
     );
   }
@@ -108,6 +134,7 @@ export class TranscriberComponent implements OnInit {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
+          this.mediaStream = stream; // Stocker le flux média
           let mimeType = 'audio/webm';
           if (!MediaRecorder.isTypeSupported(mimeType)) {
             mimeType = 'audio/ogg';
@@ -140,7 +167,11 @@ export class TranscriberComponent implements OnInit {
             const audioBlob = new Blob(this.audioChunks, { type: mimeType });
             const audioFile = new File([audioBlob], 'enregistrement.webm', { type: mimeType });
             console.log('Fichier audio enregistré :', audioFile);
-            this.uploadAudio(audioFile);
+
+            // Utiliser NgZone pour s'assurer que les changements sont détectés
+            this.ngZone.run(() => {
+              this.uploadAudio(audioFile);
+            });
           };
         })
         .catch(err => {
@@ -158,6 +189,13 @@ export class TranscriberComponent implements OnInit {
       this.mediaRecorder.stop();
       this.isRecording = false;
       console.log('Enregistrement arrêté.');
+    }
+
+    // Arrêter tous les tracks du flux média pour libérer le microphone
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+      console.log('Flux média arrêté pour libérer le microphone.');
     }
   }
 
@@ -242,7 +280,9 @@ export class TranscriberComponent implements OnInit {
     this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
         console.log('Transcription récupérée :', response.transcription);
-        this.selectedTranscription = response.transcription;
+        this.ngZone.run(() => {
+          this.selectedTranscription = response.transcription;
+        });
         console.log('selectedTranscription définie sur :', this.selectedTranscription);
       },
       (error: HttpErrorResponse) => {
@@ -261,7 +301,9 @@ export class TranscriberComponent implements OnInit {
     this.http.get<any>('http://127.0.0.1:8000/history/', { headers }).subscribe(
       response => {
         console.log('Réponse de l\'historique :', response);
-        this.history = response.history; // Assurez-vous que 'history' est une propriété définie dans le composant
+        this.ngZone.run(() => {
+          this.history = response.history; // Assurez-vous que 'history' est une propriété définie dans le composant
+        });
         console.log('Historique mis à jour :', this.history);
       },
       (error: HttpErrorResponse) => {
