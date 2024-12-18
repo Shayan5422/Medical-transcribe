@@ -397,5 +397,18 @@ uploadAudio(file: File): void {
     this.isEditing = false;
     this.editedTranscription = '';
   }
-
+  closeTranscription(): void {
+    this.transcription = null;
+    this.selectedTranscription = null;
+    this.selectedUploadId = null;
+    this.isEditing = false;
+    this.editedTranscription = '';
+  }
+  getCurrentFileName(): string | null {
+    if (this.selectedUploadId) {
+      const record = this.history.find(h => h.upload_id === this.selectedUploadId);
+      return record ? record.filename : null;
+    }
+    return this.selectedFile ? this.selectedFile.name : null;
+  }
 }

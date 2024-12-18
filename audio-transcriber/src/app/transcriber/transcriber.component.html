@@ -116,13 +116,16 @@
       <!-- Section de transcription unifiée -->
       <div class="card bg-base-100 shadow-md p-6" *ngIf="transcription || selectedTranscription">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="card-title text-lg font-semibold">
-            Transcription
-            <ng-container *ngIf="selectedTranscription">
-              (historique)
-            </ng-container>
-          </h3>
-          <div class="space-x-2">
+          <div class="flex items-center gap-3">
+            <h3 class="card-title text-lg font-semibold">
+              Transcription
+              <ng-container *ngIf="selectedTranscription"></ng-container>
+            </h3>
+            <span class="text-sm text-gray-600 font-mono" *ngIf="getCurrentFileName()">
+              - {{ getCurrentFileName() }}
+            </span>
+          </div>
+          <div class="flex items-center space-x-2">
             <!-- Copy button -->
             <div class="relative inline-block">
               <button 
@@ -155,6 +158,16 @@
                 <path d="m15 5 4 4"></path>
               </svg>
             </button>
+
+            <button 
+        class="btn btn-ghost btn-sm p-2"
+        (click)="closeTranscription()"
+        title="Fermer">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
           </div>
         </div>
         
