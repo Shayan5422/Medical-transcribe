@@ -202,6 +202,13 @@
         </div>
 
         <!-- Transcription Content -->
+        <div class="mb-6" *ngIf="audioStreamUrl && token">
+          <app-audio-player 
+            [audioUrl]="audioStreamUrl"
+            [token]="token">
+          </app-audio-player>
+        </div>
+        
         <ng-container *ngIf="!isEditing">
           <pre class="whitespace-pre-wrap bg-base-200 p-4 rounded-lg text-sm font-mono">{{ transcription || selectedTranscription }}</pre>
         </ng-container>
@@ -277,12 +284,7 @@
             </svg>
             <span class="ml-2">PDF</span>
           </button>
-          <div class="mb-6" *ngIf="audioStreamUrl">
-            <app-audio-player 
-              [audioUrl]="audioStreamUrl"
-              [token]="token">
-            </app-audio-player>
-          </div>
+          
         </div>
       </div>
     </main>

@@ -1,5 +1,5 @@
 // audio-player.component.ts
-import { Component, Input, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetectorRef } from '@angular/core';
+import { Component, Input, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetectorRef, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -176,15 +176,39 @@ export class AudioPlayerComponent implements OnInit, OnDestroy {
   ngOnInit() {
     this.loadAudio();
   }
+  private resetPlayer() {
+    const audio = this.audioElement?.nativeElement;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = '';
+    }
+    this.isPlaying = false;
+    this.isLoaded = false;
+    this.currentTime = 0;
+    this.duration = 0;
+    
+    this.cdr.detectChanges();
+  }
 
+  
   ngOnDestroy() {
     const audio = this.audioElement?.nativeElement;
     if (audio) {
       audio.pause();
       audio.src = '';
+      this.resetPlayer();
     }
   }
-
+  ngOnChanges(changes: SimpleChanges) {
+    // Check if audioUrl has changed
+    if (changes['audioUrl'] && !changes['audioUrl'].firstChange) {
+      // Reset player state
+      this.resetPlayer();
+      // Load new audio
+      this.loadAudio();
+    }
+  }
   private loadAudio() {
     if (!this.token || !this.audioUrl) {
       console.error('Missing token or URL');

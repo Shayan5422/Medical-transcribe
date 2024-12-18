@@ -105,8 +105,12 @@ export class TranscriberComponent implements OnInit {
   // Télécharger le fichier audio vers le serveur
   // Dans la méthode selectUpload
   selectUpload(upload_id: number): void {
+    // Reset audio stream URL first
+    this.audioStreamUrl = null;
     this.selectedUploadId = upload_id;
     this.transcription = null;
+
+    // Set new audio stream URL
     this.audioStreamUrl = `/api/stream-audio/${upload_id}`;
 
     const headers = new HttpHeaders({
@@ -414,7 +418,7 @@ uploadAudio(file: File): void {
     this.selectedUploadId = null;
     this.isEditing = false;
     this.editedTranscription = '';
-    this.audioStreamUrl = null;
+    this.audioStreamUrl = null; // Reset audio URL
   }
   getCurrentFileName(): string | null {
     if (this.selectedUploadId) {
