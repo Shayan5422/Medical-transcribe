@@ -46,6 +46,7 @@ origins = [
      "http://medtranscribe.fr",
     "https://medtranscribe.fr",
     "https://www.medtranscribe.fr",
+    "http://localhost:4200",
      # Your Angular app's address
     # Add other origins if necessary
 ]
@@ -185,8 +186,23 @@ async def upload_audio(
     """
     logger.info(f"User {user.username} is uploading file: {file.filename}")
     
-    # Sanitize the original filename
-    original_filename = secure_filename(file.filename)
+    # Get the next patient number
+    last_upload = db.query(Upload).filter(
+        Upload.filename.like("patient_%")
+    ).order_by(Upload.id.desc()).first()
+    
+    if last_upload:
+        try:
+            last_number = int(last_upload.filename.split('_')[1].split('.')[0])
+            new_number = last_number + 1
+        except (IndexError, ValueError):
+            new_number = 1
+    else:
+        new_number = 1
+    
+    # Create new patient filename
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    new_filename = f"patient_{new_number}{file_extension}"
     
     # Extract the main content type
     content_type_main = file.content_type.split(';')[0].strip()
@@ -200,9 +216,9 @@ async def upload_audio(
         "audio/webm",
         "audio/ogg",
         "audio/flac",
-        "audio/m4a",    # اضافه شده
-        "audio/x-m4a",  # اضافه شده
-        "audio/mp4",    # اضافه شده
+        "audio/m4a",
+        "audio/x-m4a",
+        "audio/mp4",
         "audio/aac",
     ]
     
@@ -211,8 +227,8 @@ async def upload_audio(
         logger.warning(f"Unsupported file type: {content_type_main}")
         raise HTTPException(status_code=400, detail="Unsupported audio file format.")
     
-    # Save the uploaded audio file
-    file_path = os.path.join(AUDIO_DIR, original_filename)
+    # Save the uploaded audio file with the new patient filename
+    file_path = os.path.join(AUDIO_DIR, new_filename)
     with open(file_path, "wb") as f:
         f.write(await file.read())
     logger.info(f"File saved to {file_path}")
@@ -221,15 +237,14 @@ async def upload_audio(
     if content_type_main != "audio/wav":
         try:
             audio = AudioSegment.from_file(file_path)
-            # Append a UUID to ensure unique transcription filename
-            unique_id = uuid.uuid4().hex
-            wav_filename = f"{os.path.splitext(original_filename)[0]}_{unique_id}.wav"
+            # Create WAV filename maintaining the patient number
+            wav_filename = f"patient_{new_number}.wav"
             wav_path = os.path.join(AUDIO_DIR, wav_filename)
             audio = audio.set_channels(1)  # Convert to mono
             audio.export(wav_path, format="wav")
             os.remove(file_path)  # Remove original file
             file_path = wav_path
-            original_filename = wav_filename  # Update filename
+            new_filename = wav_filename  # Update filename
             logger.info(f"Converted file to {wav_path}")
         except Exception as e:
             logger.error(f"Error converting audio: {e}")
@@ -242,9 +257,8 @@ async def upload_audio(
         logger.error(f"Error during transcription: {e}")
         raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
     
-    # Generate a unique transcription filename using UUID
-    transcription_unique_id = uuid.uuid4().hex
-    transcription_filename = f"{os.path.splitext(os.path.basename(original_filename))[0]}_transcription_{transcription_unique_id}.txt"
+    # Generate transcription filename maintaining the patient number format
+    transcription_filename = f"patient_{new_number}_transcription.txt"
     transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
     
     # Save the transcription to a text file
@@ -254,7 +268,7 @@ async def upload_audio(
     
     # Save upload record to the database
     upload_record = Upload(
-        filename=original_filename,  # Saved audio filename
+        filename=new_filename,  # Saved audio filename with patient number
         transcription_filename=transcription_filename,
         owner=user
     )
