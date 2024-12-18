@@ -35,6 +35,7 @@ export class TranscriberComponent implements OnInit {
   currentTheme: string = 'light';
   isEditing: boolean = false;
   editedTranscription: string = '';
+  showCopySuccess: boolean = false;
 
   
   constructor(
@@ -376,7 +377,18 @@ uploadAudio(file: File): void {
     const text = this.transcription || this.selectedTranscription;
     if (text) {
       navigator.clipboard.writeText(text).then(
-        
+        () => {
+          // Show success icon
+          this.showCopySuccess = true;
+          
+          // Hide success icon after 2 seconds
+          setTimeout(() => {
+            this.ngZone.run(() => {
+              this.showCopySuccess = false;
+            });
+          }, 2000);
+        },
+        () => alert('Erreur lors de la copie')
       );
     }
   }

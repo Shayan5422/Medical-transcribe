@@ -124,15 +124,26 @@
           </h3>
           <div class="space-x-2">
             <!-- Copy button -->
-            <button 
-              class="btn btn-ghost btn-sm p-2"
-              (click)="copyTranscription()"
-              title="Copier">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect width="13" height="13" x="9" y="9"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
+            <div class="relative inline-block">
+              <button 
+                class="btn btn-ghost btn-sm p-2 relative"
+                (click)="copyTranscription()"
+                title="Copier">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="13" height="13" x="9" y="9"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+              
+              <!-- Success Icon -->
+              <div 
+                *ngIf="showCopySuccess"
+                class="absolute -top-1 -right-1 bg-green-500 rounded-full p-1 transform scale-75 transition-all duration-200">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </div>
+            </div>
             <!-- Edit button -->
             <button 
               class="btn btn-ghost btn-sm p-2"
