@@ -107,16 +107,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
             </ng-container>
           </button>
           
-          <input
-            type="range"
-            class="w-24 h-2 bg-base-300 rounded-lg appearance-none cursor-pointer"
-            [value]="volume"
-            min="0"
-            max="1"
-            step="0.1"
-            (input)="onVolumeChange($event)"
-            [disabled]="!isLoaded"
-          />
+          
         </div>
       </div>
 
