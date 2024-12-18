@@ -42,7 +42,7 @@ def get_db():
 
 # CORS configuration
 origins = [
-    "http://51.15.224.218:4200", 
+    "https://51.15.224.218:4200", 
      "http://medtranscribe.fr",
     "https://medtranscribe.fr",
     "https://www.medtranscribe.fr",
