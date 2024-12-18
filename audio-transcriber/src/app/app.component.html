@@ -1,15 +1,7 @@
-<!-- Navigation -->
 <nav class="bg-white border-b border-gray-200 fixed w-full z-50">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex justify-center md:justify-between h-16">
-      <!-- Logo/Brand -->
-      <div class="flex items-center">
-        <a class="flex items-center" href="#">
-          <span class="text-xl font-semibold text-gray-800">Transcriber App</span>
-        </a>
-      </div>
-
-      <!-- Mobile menu button -->
+    <div class="flex justify-between h-16 relative">
+      <!-- Mobile menu button (left side) -->
       <div class="flex items-center md:hidden">
         <button 
           type="button" 
@@ -39,6 +31,14 @@
           </svg>
         </button>
       </div>
+
+      <div class="absolute left-1/2 transform -translate-x-1/2 flex items-center">
+        <a class="flex items-center" href="#">
+          <span class="text-xl font-semibold text-gray-800">Transcriber App</span>
+        </a>
+      </div>
+
+      <div class="w-10 md:hidden"></div>
 
       <!-- Desktop menu -->
       <div class="hidden md:flex md:items-center md:space-x-6">
