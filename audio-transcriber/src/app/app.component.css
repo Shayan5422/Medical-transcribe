@@ -34,9 +34,7 @@
     color: #6c757d;
   }
   
-  .navbar-toggler-icon {
-    background-color: #007bff;
-  }
+  
   
   /* بهینه‌سازی برای نمایش در موبایل */
   @media (max-width: 768px) {
