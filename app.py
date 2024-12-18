@@ -42,7 +42,9 @@ def get_db():
 
 # CORS configuration
 origins = [
-    "http://51.15.224.218:4200",  # Your Angular app's address
+    "http://51.15.224.218:4200", 
+     "http://medtranscribe.fr",
+    "https://medtranscribe.fr", # Your Angular app's address
     # Add other origins if necessary
 ]
 
