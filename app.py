@@ -31,7 +31,7 @@ app = FastAPI()
 
 # Initialize the database
 init_db()
-
+processing_semaphore = asyncio.Semaphore(1)
 # Dependency to get DB session
 def get_db():
     db = SessionLocal()
@@ -127,7 +127,7 @@ AUDIO_DIR = "audio_files"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # Thread pool for blocking operations
-executor = ThreadPoolExecutor(max_workers=4)  # Adjust as needed
+
 
 @app.post("/register/", response_model=Token)
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -175,6 +175,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     logger.info(f"User logged in successfully: {form_data.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+
 @app.post("/upload-audio/")
 async def upload_audio(
     user: User = Depends(get_current_user),
@@ -183,6 +185,7 @@ async def upload_audio(
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
+    Processing is done sequentially using a semaphore.
     """
     logger.info(f"User {user.username} is uploading file: {file.filename}")
     
@@ -222,12 +225,11 @@ async def upload_audio(
         "audio/aac",
     ]
     
-    # Check if the type is supported
     if content_type_main not in supported_types:
         logger.warning(f"Unsupported file type: {content_type_main}")
         raise HTTPException(status_code=400, detail="Unsupported audio file format.")
     
-    # Save the uploaded audio file with the new patient filename
+    # Save the uploaded audio file
     file_path = os.path.join(AUDIO_DIR, new_filename)
     with open(file_path, "wb") as f:
         f.write(await file.read())
@@ -237,38 +239,40 @@ async def upload_audio(
     if content_type_main != "audio/wav":
         try:
             audio = AudioSegment.from_file(file_path)
-            # Create WAV filename maintaining the patient number
             wav_filename = f"patient_{new_number}.wav"
             wav_path = os.path.join(AUDIO_DIR, wav_filename)
-            audio = audio.set_channels(1)  # Convert to mono
+            audio = audio.set_channels(1)
             audio.export(wav_path, format="wav")
-            os.remove(file_path)  # Remove original file
+            os.remove(file_path)
             file_path = wav_path
-            new_filename = wav_filename  # Update filename
+            new_filename = wav_filename
             logger.info(f"Converted file to {wav_path}")
         except Exception as e:
             logger.error(f"Error converting audio: {e}")
             raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
     
-    # Process transcription asynchronously
-    try:
-        transcription = await asyncio.get_event_loop().run_in_executor(executor, process_transcription, file_path)
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}")
-        raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
+    # Process transcription with semaphore for sequential processing
+    async with processing_semaphore:
+        logger.info(f"Starting transcription for {new_filename}")
+        try:
+            # Using asyncio.to_thread instead of executor
+            transcription = await asyncio.to_thread(process_transcription, file_path)
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}")
+            raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
     
-    # Generate transcription filename maintaining the patient number format
+    # Generate transcription filename
     transcription_filename = f"patient_{new_number}_transcription.txt"
     transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
     
-    # Save the transcription to a text file
+    # Save the transcription
     with open(transcription_path, "w", encoding="utf-8") as f:
         f.write(transcription.strip())
     logger.info(f"Transcription saved to {transcription_path}")
     
-    # Save upload record to the database
+    # Save upload record
     upload_record = Upload(
-        filename=new_filename,  # Saved audio filename with patient number
+        filename=new_filename,
         transcription_filename=transcription_filename,
         owner=user
     )
@@ -289,14 +293,12 @@ async def upload_audio(
 
 def process_transcription(file_path):
     """
-    Blocking function to process audio transcription.
+    Process audio transcription sequentially.
     """
     logger.info(f"Processing transcription for {file_path}")
-    # Load audio with SoundFile
     audio_data, samplerate = sf.read(file_path)
     logger.info(f"Audio data loaded: {len(audio_data)} samples at {samplerate} Hz")
     
-    # Resample if necessary
     if samplerate != 16000:
         try:
             audio_data = librosa.resample(audio_data, orig_sr=samplerate, target_sr=16000)
@@ -306,7 +308,6 @@ def process_transcription(file_path):
             logger.error(f"Error resampling audio: {e}")
             raise e
     
-    # Divide audio into 30-second segments
     segments = diviser_audio(audio_data, samplerate, duree_max=29)
     logger.info(f"Audio divided into {len(segments)} segment(s).")
     
@@ -315,7 +316,6 @@ def process_transcription(file_path):
     for idx, segment in enumerate(segments):
         try:
             logger.info(f"Processing segment {idx + 1}/{len(segments)}")
-            # Use ASR pipeline for transcription
             transcription = asr_pipeline(segment)["text"]
             transcription_complete += transcription + " "
             logger.info(f"Segment {idx + 1} transcription: {transcription}")

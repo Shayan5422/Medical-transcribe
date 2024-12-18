@@ -146,8 +146,9 @@ uploadAudio(file: File): void {
   this.ngZone.run(() => {
     this.isTranscribing = true;
     this.transcription = null;
-    this.selectedTranscription = null; // Réinitialiser la transcription sélectionnée
-    this.selectedUploadId = null; // Réinitialiser l'ID sélectionné
+    this.selectedTranscription = null;
+    this.selectedUploadId = null;
+    this.audioStreamUrl = null; // Reset audio URL
   });
 
   this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
@@ -157,6 +158,9 @@ uploadAudio(file: File): void {
         this.transcription = response.transcription;
         this.transcriptionFile = response.transcription_file;
         this.isTranscribing = false;
+        
+        this.selectedUploadId = response.upload_id; 
+        this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`; 
       });
       
       console.log('Transcription définie :', this.transcription);

@@ -18,8 +18,8 @@ class Upload(Base):
     __tablename__ = 'uploads'
     
     id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, unique=True, index=True, nullable=False)
-    transcription_filename = Column(String, unique=True, index=True, nullable=False)
+    filename = Column(String, unique=False, index=True, nullable=False)
+    transcription_filename = Column(String, unique=False, index=True, nullable=False)
     upload_time = Column(DateTime, default=datetime.datetime.utcnow)
     user_id = Column(Integer, ForeignKey('users.id'))
     
