@@ -420,3 +420,51 @@ def diviser_audio(audio, samplerate=16000, duree_max=29):
         segments.append(segment)
 
     return segments
+
+@app.delete("/history/{upload_id}")
+async def delete_upload(
+    upload_id: int, 
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Delete a specific upload and its associated files."""
+    upload = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # Delete associated files
+    audio_path = os.path.join(AUDIO_DIR, upload.filename)
+    transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
+    
+    try:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        if os.path.exists(transcription_path):
+            os.remove(transcription_path)
+    except Exception as e:
+        logger.error(f"Error deleting files: {e}")
+    
+    # Delete database record
+    db.delete(upload)
+    db.commit()
+    
+    return {"message": "Upload deleted successfully"}
+
+@app.put("/history/{upload_id}")
+async def update_transcription(
+    upload_id: int,
+    transcription: str = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the transcription text for a specific upload."""
+    upload = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # Update transcription file
+    transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
+    with open(transcription_path, "w", encoding="utf-8") as f:
+        f.write(transcription)
+    
+    return {"message": "Transcription updated successfully"}

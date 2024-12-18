@@ -33,6 +33,10 @@ export class TranscriberComponent implements OnInit {
   selectedUploadId: number | null = null;
   selectedTranscription: string | null = null;
   currentTheme: string = 'light';
+  isEditing: boolean = false;
+  editedTranscription: string = '';
+
+  
   constructor(
     private http: HttpClient,
     private router: Router,
@@ -317,4 +321,70 @@ uploadAudio(file: File): void {
       }
     );
   }
+  deleteUpload(upload_id: number): void {
+    if (confirm('Êtes-vous sûr de vouloir supprimer cet enregistrement ?')) {
+      const headers = new HttpHeaders({
+        'Authorization': `Bearer ${this.token}`
+      });
+
+      this.http.delete(`/api/history/${upload_id}`, { headers }).subscribe(
+        () => {
+          this.fetchHistory();
+          if (this.selectedUploadId === upload_id) {
+            this.selectedUploadId = null;
+            this.selectedTranscription = null;
+          }
+          alert('Enregistrement supprimé avec succès');
+        },
+        error => {
+          console.error('Erreur lors de la suppression:', error);
+          alert('Erreur lors de la suppression');
+        }
+      );
+    }
+  }
+
+  startEditing(): void {
+    this.isEditing = true;
+    this.editedTranscription = this.selectedTranscription || '';
+  }
+
+  saveTranscription(): void {
+    if (!this.selectedUploadId) return;
+
+    const formData = new FormData();
+    formData.append('transcription', this.editedTranscription);
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    this.http.put(`/api/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
+      () => {
+        this.selectedTranscription = this.editedTranscription;
+        this.isEditing = false;
+        alert('Transcription mise à jour avec succès');
+      },
+      error => {
+        console.error('Erreur lors de la mise à jour:', error);
+        alert('Erreur lors de la mise à jour');
+      }
+    );
+  }
+
+  copyTranscription(): void {
+    const text = this.transcription || this.selectedTranscription;
+    if (text) {
+      navigator.clipboard.writeText(text).then(
+        () => alert('Transcription copiée dans le presse-papiers'),
+        () => alert('Erreur lors de la copie')
+      );
+    }
+  }
+
+  cancelEditing(): void {
+    this.isEditing = false;
+    this.editedTranscription = '';
+  }
+
 }
