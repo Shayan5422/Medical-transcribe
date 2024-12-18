@@ -331,16 +331,32 @@ uploadAudio(file: File): void {
       response => {
         console.log('Réponse de l\'historique :', response);
         this.ngZone.run(() => {
-          this.history = response.history; // Assurez-vous que 'history' est une propriété définie dans le composant
+          this.history = response.history;
         });
         console.log('Historique mis à jour :', this.history);
       },
       (error: HttpErrorResponse) => {
         console.error('Erreur lors de la récupération de l\'historique :', error);
         
+        // Check if the error is due to unauthorized access (401) or invalid token (403)
+        if (error.status === 401 || error.status === 403) {
+          console.log('Token invalide ou expiré, redirection vers la page de connexion.');
+          localStorage.removeItem('token'); // Clear the invalid token
+          this.ngZone.run(() => {
+            this.router.navigate(['/login']);
+          });
+        } else {
+          // For other types of errors, you might still want to redirect to login
+          console.log('Erreur lors de la récupération de l\'historique, redirection vers la page de connexion.');
+          localStorage.removeItem('token');
+          this.ngZone.run(() => {
+            this.router.navigate(['/login']);
+          });
+        }
       }
     );
   }
+  
   deleteUpload(upload_id: number): void {
     if (confirm('Êtes-vous sûr de vouloir supprimer cet enregistrement ?')) {
       const headers = new HttpHeaders({
