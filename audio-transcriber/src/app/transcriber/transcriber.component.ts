@@ -333,7 +333,7 @@ uploadAudio(file: File): void {
       },
       (error: HttpErrorResponse) => {
         console.error('Erreur lors de la récupération de l\'historique :', error);
-        alert('Erreur lors de la récupération de l\'historique.');
+        
       }
     );
   }
