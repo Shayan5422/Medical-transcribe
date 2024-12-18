@@ -277,6 +277,12 @@
             </svg>
             <span class="ml-2">PDF</span>
           </button>
+          <div class="mb-6" *ngIf="audioStreamUrl">
+            <app-audio-player 
+              [audioUrl]="audioStreamUrl"
+              [token]="token">
+            </app-audio-player>
+          </div>
         </div>
       </div>
     </main>

@@ -468,3 +468,25 @@ async def update_transcription(
         f.write(transcription)
     
     return {"message": "Transcription updated successfully"}
+
+@app.get("/stream-audio/{upload_id}")
+async def stream_audio(upload_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Stream an audio file with proper headers for HTML5 audio player.
+    """
+    upload_record = db.query(Upload).filter(Upload.id == upload_id, Upload.user_id == current_user.id).first()
+    if not upload_record:
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+    
+    audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+    
+    return FileResponse(
+        audio_path,
+        media_type='audio/wav',
+        headers={
+            'Accept-Ranges': 'bytes',
+            'Content-Disposition': f'inline; filename="{upload_record.filename}"'
+        }
+    )

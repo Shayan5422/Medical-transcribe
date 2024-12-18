@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngMod
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { jsPDF } from 'jspdf';
+import { AudioPlayerComponent } from './audio-player.component';
 
 interface UploadHistory {
   upload_id: number;
@@ -15,7 +16,7 @@ interface UploadHistory {
 @Component({
   selector: 'app-transcriber',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule,AudioPlayerComponent],
   templateUrl: './transcriber.component.html',
   styleUrls: ['./transcriber.component.css']
 })
@@ -37,6 +38,8 @@ export class TranscriberComponent implements OnInit {
   editedTranscription: string = '';
   showCopySuccess: boolean = false;
   isSidebarOpen: boolean = false;
+  audioUrl: string | null = null;
+  audioStreamUrl: string | null = null;
 
   
   constructor(
@@ -76,7 +79,9 @@ export class TranscriberComponent implements OnInit {
     // Sauvegarde du thème dans le localStorage (optionnel)
     localStorage.setItem('theme', this.currentTheme);
   }
-
+  private getAudioStreamUrl(uploadId: number): string {
+    return `/api/stream-audio/${uploadId}`;
+  }
   // Gérer la sélection de fichier
   onFileSelected(event: any): void {
     const file: File = event.target.files[0];
@@ -99,29 +104,28 @@ export class TranscriberComponent implements OnInit {
 
   // Télécharger le fichier audio vers le serveur
   // Dans la méthode selectUpload
-selectUpload(upload_id: number): void {
-  this.selectedUploadId = upload_id;
-  this.transcription = null; // Réinitialiser la transcription courante
-  console.log(`Sélection de l'upload ID : ${upload_id}`);
+  selectUpload(upload_id: number): void {
+    this.selectedUploadId = upload_id;
+    this.transcription = null;
+    this.audioStreamUrl = `/api/stream-audio/${upload_id}`;
 
-  const headers = new HttpHeaders({
-    'Authorization': `Bearer ${this.token}`
-  });
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
 
-  this.http.get<any>(`/api/get-transcription/${upload_id}`, { headers }).subscribe(
-    response => {
-      console.log('Transcription récupérée :', response.transcription);
-      this.ngZone.run(() => {
-        this.selectedTranscription = response.transcription;
-      });
-      console.log('selectedTranscription définie sur :', this.selectedTranscription);
-    },
-    (error: HttpErrorResponse) => {
-      console.error('Erreur lors de la récupération de la transcription :', error);
-      alert('Erreur lors de la récupération de la transcription.');
-    }
-  );
-}
+    this.http.get<any>(`/api/get-transcription/${upload_id}`, { headers }).subscribe(
+      response => {
+        this.ngZone.run(() => {
+          this.selectedTranscription = response.transcription;
+        });
+      },
+      error => {
+        console.error('Error fetching transcription:', error);
+        alert('Error fetching transcription');
+      }
+    );
+  }
+
 
 // Dans la méthode uploadAudio
 uploadAudio(file: File): void {
@@ -410,6 +414,7 @@ uploadAudio(file: File): void {
     this.selectedUploadId = null;
     this.isEditing = false;
     this.editedTranscription = '';
+    this.audioStreamUrl = null;
   }
   getCurrentFileName(): string | null {
     if (this.selectedUploadId) {
