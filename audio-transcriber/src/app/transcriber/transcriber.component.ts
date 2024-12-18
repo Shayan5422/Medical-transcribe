@@ -36,6 +36,7 @@ export class TranscriberComponent implements OnInit {
   isEditing: boolean = false;
   editedTranscription: string = '';
   showCopySuccess: boolean = false;
+  isSidebarOpen: boolean = false;
 
   
   constructor(
@@ -53,7 +54,11 @@ export class TranscriberComponent implements OnInit {
       console.log('Aucun token trouvé, redirection vers la page de connexion.');
       this.router.navigate(['/login']);
     }
-
+    window.addEventListener('resize', () => {
+      if (window.innerWidth >= 768) { // md breakpoint
+        this.isSidebarOpen = false;
+      }
+    });
     
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
@@ -61,7 +66,9 @@ export class TranscriberComponent implements OnInit {
     }
     document.documentElement.setAttribute('data-theme', this.currentTheme);
   }
-
+  toggleSidebar(): void {
+    this.isSidebarOpen = !this.isSidebarOpen;
+  }
   toggleTheme(): void {
     this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
     // Mettre à jour l'attribut data-theme
