@@ -142,7 +142,7 @@ uploadAudio(file: File): void {
         this.transcriptionFile = response.transcription_file;
         this.isTranscribing = false;
       });
-      alert('Transcription réussie !');
+      
       console.log('Transcription définie :', this.transcription);
       this.fetchHistory();
     },
@@ -334,7 +334,7 @@ uploadAudio(file: File): void {
             this.selectedUploadId = null;
             this.selectedTranscription = null;
           }
-          alert('Enregistrement supprimé avec succès');
+          
         },
         error => {
           console.error('Erreur lors de la suppression:', error);
@@ -363,7 +363,7 @@ uploadAudio(file: File): void {
       () => {
         this.selectedTranscription = this.editedTranscription;
         this.isEditing = false;
-        alert('Transcription mise à jour avec succès');
+        
       },
       error => {
         console.error('Erreur lors de la mise à jour:', error);
@@ -376,8 +376,7 @@ uploadAudio(file: File): void {
     const text = this.transcription || this.selectedTranscription;
     if (text) {
       navigator.clipboard.writeText(text).then(
-        () => alert('Transcription copiée dans le presse-papiers'),
-        () => alert('Erreur lors de la copie')
+        
       );
     }
   }
