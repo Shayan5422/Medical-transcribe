@@ -44,7 +44,9 @@ def get_db():
 origins = [
     "http://51.15.224.218:4200", 
      "http://medtranscribe.fr",
-    "https://medtranscribe.fr", # Your Angular app's address
+    "https://medtranscribe.fr",
+    "https://www.medtranscribe.fr",
+     # Your Angular app's address
     # Add other origins if necessary
 ]
 
