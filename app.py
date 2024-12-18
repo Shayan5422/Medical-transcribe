@@ -200,6 +200,10 @@ async def upload_audio(
         "audio/webm",
         "audio/ogg",
         "audio/flac",
+        "audio/m4a",    # اضافه شده
+        "audio/x-m4a",  # اضافه شده
+        "audio/mp4",    # اضافه شده
+        "audio/aac",
     ]
     
     # Check if the type is supported
