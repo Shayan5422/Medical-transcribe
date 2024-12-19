@@ -1,5 +1,5 @@
 aside {
-  max-height: calc(100vh - 4rem); /* Ajustez selon la hauteur du header */
+  /* Ajustez selon la hauteur du header */
   overflow-y: auto;
 }
 /* Optionnel : Ajuster la taille des icônes et du texte */
