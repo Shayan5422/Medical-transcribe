@@ -1,9 +1,9 @@
 // src/app/register/register.component.ts
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms'; // Import FormsModule for ngModel
+import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngModel
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router'; // For navigation
+import { Router } from '@angular/router'; // Pour la navigation
 
 @Component({
   selector: 'app-register',
@@ -16,6 +16,7 @@ export class RegisterComponent implements OnInit {
   username: string = '';
   password: string = '';
   confirmPassword: string = '';
+  referralCode: string = ''; // Ajout du champ Code de parrainage
   errorMessage: string = '';
   successMessage: string = '';
 
@@ -24,23 +25,36 @@ export class RegisterComponent implements OnInit {
   ngOnInit(): void {}
 
   onRegister(): void {
+    // Vérification de la correspondance des mots de passe
     if (this.password !== this.confirmPassword) {
-      this.errorMessage = 'Passwords do not match.';
+      this.errorMessage = 'Les mots de passe ne correspondent pas.';
       this.successMessage = '';
       return;
     }
-  
-    const registerData = { username: this.username, password: this.password };
+
+    // Vérification du code de parrainage
+    if (this.referralCode !== 'neurocorehealth') {
+      this.errorMessage = 'Le code de parrainage est invalide.';
+      this.successMessage = '';
+      return;
+    }
+
+    const registerData = { 
+      username: this.username, 
+      password: this.password,
+      referralCode: this.referralCode // Envoi du code de parrainage au serveur (optionnel)
+    };
+
     this.http.post<any>('/api/register/', registerData).subscribe(
       (response) => {
-        this.successMessage = 'Registration successful. You can now log in.';
+        this.successMessage = 'Inscription réussie. Vous pouvez maintenant vous connecter.';
         this.errorMessage = '';
         this.router.navigate(['/login']);
       },
       (error) => {
-        this.errorMessage = 'Registration failed. Username might already be taken.';
+        this.errorMessage = 'L\'inscription a échoué. Le nom d\'utilisateur pourrait être déjà pris.';
         this.successMessage = '';
-        console.error('Registration failed', error);
+        console.error('Échec de l\'inscription', error);
       }
     );
   }

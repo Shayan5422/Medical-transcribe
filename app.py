@@ -29,6 +29,9 @@ import uuid
 from werkzeug.utils import secure_filename  # For filename sanitization
 import logging
 import aiofiles
+import asyncio
+from collections import defaultdict
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +44,8 @@ init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
 executor = ThreadPoolExecutor(max_workers=1)  # Adjust the number of workers based on your server's capacity
+# Dictionnaire pour stocker les verrous par utilisateur
+user_locks = defaultdict(asyncio.Lock)
 
 # Dependency to get DB session
 def get_db():
@@ -196,110 +201,126 @@ async def upload_audio(
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
-    Processing is done in parallel using a ThreadPoolExecutor.
+    Ensure that each user can only have one transcription request at a time.
     """
     logger.info(f"User {user.username} is uploading file: {file.filename}")
 
-    # Generate a unique filename using UUID to prevent race conditions
-    unique_id = uuid.uuid4().hex
-    file_extension = os.path.splitext(file.filename)[1].lower()
-    new_filename = f"{unique_id}{file_extension}"
+    # Obtenir le verrou associé à l'utilisateur
+    user_lock = user_locks[user.id]
 
-    # Extract the main content type
-    content_type_main = file.content_type.split(";")[0].strip()
-
-    # Supported audio types
-    supported_types = [
-        "audio/wav",
-        "audio/mpeg",
-        "audio/mp3",
-        "audio/x-wav",
-        "audio/webm",
-        "audio/ogg",
-        "audio/flac",
-        "audio/m4a",
-        "audio/x-m4a",
-        "audio/mp4",
-        "audio/aac",
-    ]
-
-    if content_type_main not in supported_types:
-        logger.warning(f"Unsupported file type: {content_type_main}")
-        raise HTTPException(status_code=400, detail="Unsupported audio file format.")
-
-    # Save the uploaded audio file asynchronously
-    file_path = os.path.join(AUDIO_DIR, new_filename)
-    try:
-        async with aiofiles.open(file_path, "wb") as out_file:
-            content = await file.read()
-            await out_file.write(content)
-        logger.info(f"File saved to {file_path}")
-    except Exception as e:
-        logger.error(f"Error saving uploaded file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
-
-    # Convert to WAV if necessary
-    if content_type_main != "audio/wav":
-        try:
-            audio = AudioSegment.from_file(file_path)
-            wav_filename = f"{unique_id}.wav"
-            wav_path = os.path.join(AUDIO_DIR, wav_filename)
-            audio = audio.set_channels(1)
-            audio.export(wav_path, format="wav")
-            os.remove(file_path)
-            file_path = wav_path
-            new_filename = wav_filename
-            logger.info(f"Converted file to {wav_path}")
-        except Exception as e:
-            logger.error(f"Error converting audio: {e}")
-            raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
-
-    # Process transcription in a separate thread
-    try:
-        transcription = await asyncio.get_event_loop().run_in_executor(
-            executor, process_transcription, file_path
-        )
-    except Exception as e:
-        logger.error(f"Error during transcription: {e}")
-        raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
-
-    # Generate transcription filename
-    transcription_filename = f"{unique_id}_transcription.txt"
-    transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
-
-    # Save the transcription asynchronously
-    try:
-        async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
-            await f.write(transcription.strip())
-        logger.info(f"Transcription saved to {transcription_path}")
-    except Exception as e:
-        logger.error(f"Error saving transcription: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save transcription.")
-
-    # Save upload record
-    upload_record = Upload(
-        filename=new_filename,
-        transcription_filename=transcription_filename,
-        owner=user,
-    )
-    db.add(upload_record)
-    try:
-        db.commit()
-        db.refresh(upload_record)
-        logger.info(f"Upload record created with id: {upload_record.id}")
-    except Exception as e:
-        logger.error(f"Database commit failed: {e}")
+    # Tenter d'acquérir le verrou sans attendre
+    if user_lock.locked():
+        logger.warning(f"User {user.username} already has a transcription in progress.")
         raise HTTPException(
-            status_code=500, detail="Failed to save upload record to the database."
+            status_code=429,
+            detail="Vous avez déjà une transcription en cours. Veuillez réessayer plus tard.",
         )
 
-    return JSONResponse(
-        content={
-            "transcription": transcription.strip(),
-            "transcription_file": transcription_filename,
-            "upload_id": upload_record.id,
-        }
-    )
+    # Acquérir le verrou
+    async with user_lock:
+        logger.info(f"Acquired lock for user {user.username}")
+
+        # Générer un nom de fichier unique en utilisant UUID pour éviter les conditions de course
+        unique_id = uuid.uuid4().hex
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        new_filename = f"{unique_id}{file_extension}"
+
+        # Extraire le type de contenu principal
+        content_type_main = file.content_type.split(";")[0].strip()
+
+        # Types audio supportés
+        supported_types = [
+            "audio/wav",
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/x-wav",
+            "audio/webm",
+            "audio/ogg",
+            "audio/flac",
+            "audio/m4a",
+            "audio/x-m4a",
+            "audio/mp4",
+            "audio/aac",
+        ]
+
+        if content_type_main not in supported_types:
+            logger.warning(f"Unsupported file type: {content_type_main}")
+            raise HTTPException(status_code=400, detail="Format de fichier audio non supporté.")
+
+        # Sauvegarder le fichier audio téléchargé de manière asynchrone
+        file_path = os.path.join(AUDIO_DIR, new_filename)
+        try:
+            async with aiofiles.open(file_path, "wb") as out_file:
+                content = await file.read()
+                await out_file.write(content)
+            logger.info(f"File saved to {file_path}")
+        except Exception as e:
+            logger.error(f"Error saving uploaded file: {e}")
+            raise HTTPException(status_code=500, detail="Échec de la sauvegarde du fichier téléchargé.")
+
+        # Convertir en WAV si nécessaire
+        if content_type_main != "audio/wav":
+            try:
+                audio = AudioSegment.from_file(file_path)
+                wav_filename = f"{unique_id}.wav"
+                wav_path = os.path.join(AUDIO_DIR, wav_filename)
+                audio = audio.set_channels(1)
+                audio.export(wav_path, format="wav")
+                os.remove(file_path)
+                file_path = wav_path
+                new_filename = wav_filename
+                logger.info(f"Converted file to {wav_path}")
+            except Exception as e:
+                logger.error(f"Error converting audio: {e}")
+                raise HTTPException(status_code=400, detail=f"Erreur lors de la conversion de l'audio: {e}")
+
+        # Traiter la transcription dans un thread séparé
+        try:
+            transcription = await asyncio.get_event_loop().run_in_executor(
+                executor, process_transcription, file_path
+            )
+        except Exception as e:
+            logger.error(f"Error during transcription: {e}")
+            raise HTTPException(status_code=500, detail=f"Erreur lors de la transcription: {e}")
+
+        # Générer le nom de fichier de transcription
+        transcription_filename = f"{unique_id}_transcription.txt"
+        transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
+
+        # Sauvegarder la transcription de manière asynchrone
+        try:
+            async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
+                await f.write(transcription.strip())
+            logger.info(f"Transcription saved to {transcription_path}")
+        except Exception as e:
+            logger.error(f"Error saving transcription: {e}")
+            raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription.")
+
+        # Sauvegarder l'enregistrement de l'upload
+        upload_record = Upload(
+            filename=new_filename,
+            transcription_filename=transcription_filename,
+            owner=user,
+        )
+        db.add(upload_record)
+        try:
+            db.commit()
+            db.refresh(upload_record)
+            logger.info(f"Upload record created with id: {upload_record.id}")
+        except Exception as e:
+            logger.error(f"Database commit failed: {e}")
+            raise HTTPException(
+                status_code=500, detail="Échec de la sauvegarde de l'enregistrement de l'upload dans la base de données."
+            )
+
+        return JSONResponse(
+            content={
+                "transcription": transcription.strip(),
+                "transcription_file": transcription_filename,
+                "upload_id": upload_record.id,
+            }
+        )
+
 
 def process_transcription(file_path):
     """

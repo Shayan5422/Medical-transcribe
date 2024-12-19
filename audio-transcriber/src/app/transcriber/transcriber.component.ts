@@ -425,15 +425,37 @@ uploadAudio(file: File): void {
 
   // دانلود ترنسکریپشن به صورت PDF با نام بیمار
   downloadTranscriptionAsPDF(upload_id: number): void {
-    if (this.selectedTranscription) {
-      const doc = new jsPDF();
-      const lines = doc.splitTextToSize(this.selectedTranscription, 180);
-      doc.text(lines, 10, 10);
-      doc.save(`Patient_${upload_id}.pdf`); // تغییر نام فایل
-      console.log(`Transcription téléchargée en tant que PDF : Patient_${upload_id}.pdf`);
+    // Utiliser la transcription sélectionnée ou la transcription immédiate
+    const transcriptionText = this.selectedTranscription || this.transcription;
+  
+    console.log('downloadTranscriptionAsPDF appelé avec upload_id:', upload_id);
+    console.log('Texte de transcription:', transcriptionText);
+  
+    if (transcriptionText) {
+      try {
+        const doc = new jsPDF();
+  
+        // Définir la police et la taille
+        doc.setFont('Helvetica');
+        doc.setFontSize(12);
+  
+        // Diviser le texte en lignes adaptées à la page
+        const lines = doc.splitTextToSize(transcriptionText, 180); // Ajustez la largeur si nécessaire
+  
+        // Ajouter le texte au PDF
+        doc.text(lines, 10, 10);
+  
+        // Sauvegarder le PDF avec le nom du patient
+        doc.save(`Patient_${upload_id}.pdf`);
+        console.log(`Transcription téléchargée en tant que PDF : Patient_${upload_id}.pdf`);
+      } catch (error) {
+        console.error('Erreur lors de la création du PDF:', error);
+        alert('Erreur lors de la création du fichier PDF.');
+      }
     } else {
-      alert('Aucune transcription sélectionnée pour le téléchargement.');
+      alert('Aucune transcription disponible pour le téléchargement en PDF.');
     }
   }
+  
 
 }
