@@ -1,4 +1,3 @@
-<!-- transcriber.component.html -->
 <div class="min-h-screen bg-base-200">
   <!-- Mobile hamburger button -->
   <button
@@ -32,14 +31,15 @@
           Historique des Transcriptions
         </h2>
         <ul class="space-y-4">
-          <li *ngFor="let record of history">
+          <!-- تغییر: استفاده از history.slice().reverse() برای نمایش از جدید به قدیم -->
+          <li *ngFor="let record of history.slice().reverse()">
             <div class="flex flex-col space-y-2 p-4 rounded-lg bg-base-200">
               <div class="flex justify-between items-start">
                 <button 
                   class="flex-1 text-left hover:bg-base-300 transition-colors duration-200 p-2 rounded"
                   (click)="selectUpload(record.upload_id)">
                   <div class="text-sm break-all">
-                    <span class="font-bold">Fichier : </span>{{ record.filename }}
+                    <span class="font-bold">{{ getPatientName(record.upload_id) }}</span>
                   </div>
                   <div class="text-sm text-gray-500">
                     <span class="font-bold">Heure : </span>{{ record.upload_time | date:'short' }}
@@ -111,7 +111,7 @@
           <!-- Zone d'affichage du fichier -->
           <div class="flex-1 px-4 py-2 bg-gray-50 rounded-lg text-sm text-gray-600 border border-gray-200">
             <ng-container *ngIf="selectedFile; else noFileOrRecording">
-              {{ selectedFile.name }}
+              {{ getPatientName(selectedUploadId || 0) || selectedFile.name }}
             </ng-container>
             <ng-template #noFileOrRecording>
               <ng-container *ngIf="isRecording; else noFile">

@@ -101,7 +101,17 @@ export class TranscriberComponent implements OnInit {
       alert('Veuillez sélectionner un fichier audio avant de le télécharger.');
     }
   }
+  getPatientName(upload_id: number): string {
+    return `Patient_${upload_id}`;
+  }
 
+  // تابع برای دریافت نام فایل فعلی
+  getCurrentFileName(): string | null {
+    if (this.selectedUploadId) {
+      return this.getPatientName(this.selectedUploadId);
+    }
+    return this.selectedFile ? this.selectedFile.name : null;
+  }
   // Télécharger le fichier audio vers le serveur
   // Dans la méthode selectUpload
   selectUpload(upload_id: number): void {
@@ -265,60 +275,7 @@ uploadAudio(file: File): void {
   }
 
   // Télécharger le fichier de transcription depuis le serveur
-  downloadTranscriptionFile(upload_id: number): void {
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
-
-    const url = `/api/download-transcription/${upload_id}`;
-    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
-      const a = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      a.href = objectUrl;
-      a.download = `transcription_${upload_id}.txt`;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-      console.log(`Fichier de transcription transcription_${upload_id}.txt téléchargé.`);
-    }, error => {
-      console.error('Erreur lors du téléchargement du fichier de transcription :', error);
-      alert('Erreur lors du téléchargement du fichier de transcription.');
-    });
-  }
-
-  // Télécharger le fichier audio depuis le serveur
-  downloadAudioFile(upload_id: number): void {
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
-
-    const url = `/api/download-audio/${upload_id}`;
-    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
-      const a = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      a.href = objectUrl;
-      a.download = `audio_${upload_id}.wav`;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-      console.log(`Fichier audio audio_${upload_id}.wav téléchargé.`);
-    }, error => {
-      console.error('Erreur lors du téléchargement du fichier audio :', error);
-      alert('Erreur lors du téléchargement du fichier audio.');
-    });
-  }
-
-  // Télécharger la transcription en tant que PDF (Optionnel)
-  downloadTranscriptionAsPDF(upload_id: number): void {
-    if (this.selectedTranscription) {
-      const doc = new jsPDF();
-      const lines = doc.splitTextToSize(this.selectedTranscription, 180);
-      doc.text(lines, 10, 10);
-      doc.save(`transcription_${upload_id}.pdf`);
-      console.log(`Transcription téléchargée en tant que PDF : transcription_${upload_id}.pdf`);
-    } else {
-      alert('Aucune transcription sélectionnée pour le téléchargement.');
-    }
-  }
-
+  
   
 
   // Récupérer l'historique des uploads spécifiques à l'utilisateur
@@ -424,11 +381,59 @@ uploadAudio(file: File): void {
     this.editedTranscription = '';
     this.audioStreamUrl = null; // Reset audio URL
   }
-  getCurrentFileName(): string | null {
-    if (this.selectedUploadId) {
-      const record = this.history.find(h => h.upload_id === this.selectedUploadId);
-      return record ? record.filename : null;
-    }
-    return this.selectedFile ? this.selectedFile.name : null;
+  
+
+  downloadTranscriptionFile(upload_id: number): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    const url = `/api/download-transcription/${upload_id}`;
+    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
+      const a = document.createElement('a');
+      const objectUrl = URL.createObjectURL(blob);
+      a.href = objectUrl;
+      a.download = `Patient_${upload_id}.txt`; // تغییر نام فایل
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+      console.log(`Fichier de transcription Patient_${upload_id}.txt téléchargé.`);
+    }, error => {
+      console.error('Erreur lors du téléchargement du fichier de transcription :', error);
+      alert('Erreur lors du téléchargement du fichier de transcription.');
+    });
   }
+
+  downloadAudioFile(upload_id: number): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    const url = `/api/download-audio/${upload_id}`;
+    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
+      const a = document.createElement('a');
+      const objectUrl = URL.createObjectURL(blob);
+      a.href = objectUrl;
+      a.download = `Patient_${upload_id}.wav`; // تغییر نام فایل
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+      console.log(`Fichier audio Patient_${upload_id}.wav téléchargé.`);
+    }, error => {
+      console.error('Erreur lors du téléchargement du fichier audio :', error);
+      alert('Erreur lors du téléchargement du fichier audio.');
+    });
+  }
+
+  // دانلود ترنسکریپشن به صورت PDF با نام بیمار
+  downloadTranscriptionAsPDF(upload_id: number): void {
+    if (this.selectedTranscription) {
+      const doc = new jsPDF();
+      const lines = doc.splitTextToSize(this.selectedTranscription, 180);
+      doc.text(lines, 10, 10);
+      doc.save(`Patient_${upload_id}.pdf`); // تغییر نام فایل
+      console.log(`Transcription téléchargée en tant que PDF : Patient_${upload_id}.pdf`);
+    } else {
+      alert('Aucune transcription sélectionnée pour le téléchargement.');
+    }
+  }
+
 }
