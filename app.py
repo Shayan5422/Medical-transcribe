@@ -40,7 +40,7 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=4)  # Adjust the number of workers based on your server's capacity
+executor = ThreadPoolExecutor(max_workers=1)  # Adjust the number of workers based on your server's capacity
 
 # Dependency to get DB session
 def get_db():
