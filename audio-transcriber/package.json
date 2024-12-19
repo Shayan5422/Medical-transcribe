@@ -18,6 +18,7 @@
     "@angular/platform-browser": "^18.2.13",
     "@angular/platform-browser-dynamic": "^18.2.13",
     "@angular/router": "^18.2.0",
+    "@auth0/angular-jwt": "^5.2.0",
     "bootstrap": "^5.3.3",
     "daisyui": "^4.12.22",
     "jspdf": "^2.5.2",
