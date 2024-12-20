@@ -7,6 +7,7 @@ import { jsPDF } from 'jspdf';
 import { AudioPlayerComponent } from './audio-player.component';
 import { UserFilterPipe } from './user-filter.pipe';
 import { ClickOutsideDirective } from './click-outside.directive';
+import { PricingComponent } from './pricing.component';
 
 
 interface User {
@@ -27,7 +28,7 @@ interface UploadHistory {
 @Component({
   selector: 'app-transcriber',
   standalone: true,
-  imports: [CommonModule, FormsModule,AudioPlayerComponent,UserFilterPipe, ClickOutsideDirective],
+  imports: [CommonModule, FormsModule,AudioPlayerComponent,UserFilterPipe, ClickOutsideDirective,PricingComponent],
   templateUrl: './transcriber.component.html',
   styleUrls: ['./transcriber.component.css']
 })
