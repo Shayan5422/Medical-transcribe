@@ -1,4 +1,4 @@
-import { Component, OnInit, NgZone } from '@angular/core';
+import { Component, OnInit, NgZone, Directive, Output, EventEmitter, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngModel
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import { jsPDF } from 'jspdf';
 import { AudioPlayerComponent } from './audio-player.component';
 import { UserFilterPipe } from './user-filter.pipe';
+import { ClickOutsideDirective } from './click-outside.directive';
 
 
 interface User {
@@ -20,15 +21,17 @@ interface UploadHistory {
   upload_time: string;
   is_archived: boolean;
   shared_with: number[];
+  showMenu?: boolean;
 }
 
 @Component({
   selector: 'app-transcriber',
   standalone: true,
-  imports: [CommonModule, FormsModule,AudioPlayerComponent,UserFilterPipe],
+  imports: [CommonModule, FormsModule,AudioPlayerComponent,UserFilterPipe, ClickOutsideDirective],
   templateUrl: './transcriber.component.html',
   styleUrls: ['./transcriber.component.css']
 })
+
 export class TranscriberComponent implements OnInit {
   transcription: string | null = null;
   transcriptionFile: string | null = null;
