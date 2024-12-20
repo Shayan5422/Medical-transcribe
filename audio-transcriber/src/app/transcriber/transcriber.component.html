@@ -18,6 +18,43 @@
     </ng-container>
   </button>
 
+  <!-- Share Modal -->
+  <div *ngIf="showShareModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div class="bg-base-100 p-6 rounded-lg shadow-xl w-full max-w-md">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold">Partager la transcription</h3>
+        <button class="btn btn-ghost btn-sm p-2" (click)="closeShareModal()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Search input -->
+      <div class="mb-4">
+        <input 
+          type="text" 
+          [(ngModel)]="searchQuery"
+          placeholder="Rechercher un utilisateur..." 
+          class="input input-bordered w-full"
+        >
+      </div>
+
+      <!-- Users list -->
+      <div class="max-h-96 overflow-y-auto">
+        <div *ngFor="let user of users | userFilter:searchQuery" class="flex items-center justify-between p-2 hover:bg-base-200 rounded">
+          <span>{{ user.username }}</span>
+          <button 
+            class="btn btn-ghost btn-sm"
+            (click)="shareWithUser(user.id)">
+            Partager
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="flex relative">
     <!-- Sidebar -->
     <aside [ngClass]="{
@@ -31,34 +68,92 @@
           Historique des Transcriptions
         </h2>
         <ul class="space-y-4">
-          <!-- تغییر: استفاده از history.slice().reverse() برای نمایش از جدید به قدیم -->
           <li *ngFor="let record of history.slice().reverse()">
-            <div class="flex flex-col space-y-2 p-4 rounded-lg bg-base-200">
+            <div class="flex flex-col space-y-2 p-4 rounded-lg" 
+                [ngClass]="{'bg-base-200': !record.is_archived, 'bg-base-300': record.is_archived}">
               <div class="flex justify-between items-start">
                 <button 
                   class="flex-1 text-left hover:bg-base-300 transition-colors duration-200 p-2 rounded"
                   (click)="selectUpload(record.upload_id)">
                   <div class="text-sm break-all">
                     <span class="font-bold">{{ getPatientName(record.upload_id) }}</span>
+                    <span *ngIf="record.is_archived" class="ml-2 text-xs bg-gray-500 text-white px-2 py-1 rounded">
+                      Archivé
+                    </span>
                   </div>
                   <div class="text-sm text-gray-500">
                     <span class="font-bold">Heure : </span>{{ record.upload_time | date:'short' }}
                   </div>
+                  <!-- Shared users list -->
+                  <div *ngIf="getSharedWith(record).length > 0" class="mt-1 text-xs text-gray-600">
+                    <span class="font-bold">Partagé avec : </span>
+                    <div class="flex flex-wrap gap-1 mt-1">
+                      <span 
+                        *ngFor="let userId of getSharedWith(record)" 
+                        class="bg-base-300 px-2 py-1 rounded-full flex items-center gap-1">
+                        {{ getUserName(userId) }}
+                        <button 
+                          class="hover:text-error"
+                          (click)="removeShare(record.upload_id, userId); $event.stopPropagation()">
+                          ×
+                        </button>
+                      </span>
+                    </div>
+                  </div>
                 </button>
-                <button 
-                  class="btn btn-ghost btn-sm p-2"
-                  (click)="deleteUpload(record.upload_id)"
-                  title="Supprimer">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 6h18"></path>
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                  </svg>
-                </button>
+                <div class="flex gap-1">
+                  <button 
+                    class="btn btn-ghost btn-sm p-2"
+                    (click)="openShareModal(record.upload_id)"
+                    title="Partager">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="18" cy="5" r="3"/>
+                      <circle cx="6" cy="12" r="3"/>
+                      <circle cx="18" cy="19" r="3"/>
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                    </svg>
+                  </button>
+                  <button 
+                    class="btn btn-ghost btn-sm p-2"
+                    (click)="toggleArchive(record.upload_id)"
+                    [title]="record.is_archived ? 'Désarchiver' : 'Archiver'">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect width="20" height="5" x="2" y="4" rx="2"/>
+                      <rect width="20" height="5" x="2" y="14" rx="2"/>
+                      <path d="M6 9v5"/>
+                      <path d="M18 9v5"/>
+                    </svg>
+                  </button>
+                  <button 
+                    class="btn btn-ghost btn-sm p-2"
+                    (click)="deleteUpload(record.upload_id)"
+                    title="Supprimer">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18"></path>
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           </li>
         </ul>
+
+        <!-- Toggle buttons -->
+        <div class="mt-4 space-y-2">
+          <button 
+            class="btn btn-outline btn-sm w-full"
+            (click)="toggleShowArchived()">
+            {{ showArchived ? 'Masquer les archives' : 'Afficher les archives' }}
+          </button>
+          <button 
+            class="btn btn-outline btn-sm w-full"
+            (click)="toggleSharedRecords()">
+            {{ showSharedRecords ? 'Masquer les partagés' : 'Afficher les partagés' }}
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -285,7 +380,6 @@
             </svg>
             <span class="ml-2">PDF</span>
           </button>
-          
         </div>
       </div>
     </main>

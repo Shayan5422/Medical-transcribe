@@ -5,18 +5,27 @@ import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http
 import { Router } from '@angular/router';
 import { jsPDF } from 'jspdf';
 import { AudioPlayerComponent } from './audio-player.component';
+import { UserFilterPipe } from './user-filter.pipe';
+
+
+interface User {
+  id: number;
+  username: string;
+}
 
 interface UploadHistory {
   upload_id: number;
   filename: string;
   transcription_filename: string;
   upload_time: string;
+  is_archived: boolean;
+  shared_with: number[];
 }
 
 @Component({
   selector: 'app-transcriber',
   standalone: true,
-  imports: [CommonModule, FormsModule,AudioPlayerComponent],
+  imports: [CommonModule, FormsModule,AudioPlayerComponent,UserFilterPipe],
   templateUrl: './transcriber.component.html',
   styleUrls: ['./transcriber.component.css']
 })
@@ -40,6 +49,13 @@ export class TranscriberComponent implements OnInit {
   isSidebarOpen: boolean = false;
   audioUrl: string | null = null;
   audioStreamUrl: string | null = null;
+  showArchived: boolean = false;
+  users: User[] = [];
+  showShareModal: boolean = false;
+  selectedUploadForShare: number | null = null;
+  searchQuery: string = '';
+  showSharedRecords: boolean = false;
+
 
   
   constructor(
@@ -48,6 +64,21 @@ export class TranscriberComponent implements OnInit {
     private ngZone: NgZone // Injecter NgZone
   ) {}
 
+  openShareModal(upload_id: number): void {
+    this.selectedUploadForShare = upload_id;
+    this.showShareModal = true;
+    this.fetchUsers();
+  }
+
+  closeShareModal(): void {
+    this.showShareModal = false;
+    this.selectedUploadForShare = null;
+    this.searchQuery = '';
+  }
+  getSharedWith(record: UploadHistory): number[] {
+    return record.shared_with || [];
+  }
+  
   ngOnInit(): void {
     this.token = localStorage.getItem('token');
     console.log('Token récupéré :', this.token);
@@ -72,6 +103,56 @@ export class TranscriberComponent implements OnInit {
   toggleSidebar(): void {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
+  fetchUsers(): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    this.http.get<{users: User[]}>('/api/users/', { headers }).subscribe(
+      response => {
+        this.users = response.users;
+      },
+      error => {
+        console.error('Error fetching users:', error);
+      }
+    );
+  }
+
+  shareWithUser(userId: number): void {
+    if (!this.selectedUploadForShare) return;
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    this.http.post(`/api/share/${this.selectedUploadForShare}/user/${userId}`, {}, { headers }).subscribe(
+      () => {
+        this.fetchHistory();
+        alert('Transcription partagée avec succès');
+      },
+      error => {
+        console.error('Error sharing:', error);
+        alert('Erreur lors du partage');
+      }
+    );
+  }
+
+  removeShare(uploadId: number, userId: number): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    this.http.delete(`/api/share/${uploadId}/user/${userId}`, { headers }).subscribe(
+      () => {
+        this.fetchHistory();
+      },
+      error => {
+        console.error('Error removing share:', error);
+        alert('Erreur lors de la suppression du partage');
+      }
+    );
+  }
+
   toggleTheme(): void {
     this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
     // Mettre à jour l'attribut data-theme
@@ -279,25 +360,7 @@ uploadAudio(file: File): void {
   
 
   // Récupérer l'historique des uploads spécifiques à l'utilisateur
-  fetchHistory(): void {
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
   
-    this.http.get<any>('/api/history/', { headers }).subscribe(
-      response => {
-        console.log('Réponse de l\'historique :', response);
-        this.ngZone.run(() => {
-          this.history = response.history; // Assurez-vous que 'history' est une propriété définie dans le composant
-        });
-        console.log('Historique mis à jour :', this.history);
-      },
-      (error: HttpErrorResponse) => {
-        console.error('Erreur lors de la récupération de l\'historique :', error);
-        
-      }
-    );
-  }
   deleteUpload(upload_id: number): void {
     if (confirm('Êtes-vous sûr de vouloir supprimer cet enregistrement ?')) {
       const headers = new HttpHeaders({
@@ -457,5 +520,63 @@ uploadAudio(file: File): void {
     }
   }
   
+  toggleArchive(upload_id: number): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
 
+    this.http.post(`/api/toggle-archive/${upload_id}`, {}, { headers }).subscribe(
+      () => {
+        this.fetchHistory();
+      },
+      error => {
+        console.error('Error toggling archive status:', error);
+        alert('Erreur lors de la mise à jour du statut d\'archive');
+      }
+    );
+  }
+
+  fetchHistory(): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+  
+    let url = '/api/history/';
+    if (this.showArchived) {
+      url += '?include_archived=true';
+    }
+    if (this.showSharedRecords) {
+      url += (url.includes('?') ? '&' : '?') + 'include_shared=true';
+    }
+    
+    this.http.get<any>(url, { headers }).subscribe(
+      response => {
+        this.ngZone.run(() => {
+          this.history = response.history;
+        });
+      },
+      error => {
+        console.error('Error fetching history:', error);
+      }
+    );
+  }
+
+  toggleSharedRecords(): void {
+    this.showSharedRecords = !this.showSharedRecords;
+    this.fetchHistory();
+  }
+
+  getUserName(userId: number): string {
+    const user = this.users.find(u => u.id === userId);
+    return user ? user.username : `User ${userId}`;
+  }
+
+  toggleShowArchived(): void {
+    this.showArchived = !this.showArchived;
+    this.fetchHistory();
+  }
+
+  
 }
+
+

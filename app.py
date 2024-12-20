@@ -31,6 +31,7 @@ import logging
 import aiofiles
 import asyncio
 from collections import defaultdict
+from sqlalchemy import or_, text
 
 
 # Setup logging
@@ -362,19 +363,20 @@ async def download_transcription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint to download the transcription of a specific upload.
-    """
-    upload_record = (
-        db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
-        .first()
-    )
+    """Endpoint to download the transcription of a specific upload."""
+    upload_record = db.query(Upload).filter(
+        (Upload.id == upload_id) & 
+        (
+            (Upload.user_id == current_user.id) |  # User is owner
+            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
+        )
+    ).first()
+
     if not upload_record:
         logger.warning(
-            f"Transcription record not found for upload_id: {upload_id} and user: {current_user.username}"
+            f"Transcription record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
         )
-        raise HTTPException(status_code=404, detail="Transcription file not found.")
+        raise HTTPException(status_code=404, detail="Transcription file not found or access denied.")
 
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
     if not os.path.exists(transcription_path):
@@ -383,7 +385,9 @@ async def download_transcription(
 
     logger.info(f"Transcription file found: {upload_record.transcription_filename}")
     return FileResponse(
-        transcription_path, media_type="text/plain", filename=upload_record.transcription_filename
+        transcription_path, 
+        media_type="text/plain", 
+        filename=upload_record.transcription_filename
     )
 
 @app.get("/download-audio/{upload_id}")
@@ -418,26 +422,40 @@ async def download_audio(
 
 @app.get("/history/", response_model=UploadHistoryResponse)
 async def get_history(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    include_archived: bool = False,
+    include_shared: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Endpoint to retrieve the upload history of the authenticated user.
-    """
-    uploads = db.query(Upload).filter(Upload.user_id == current_user.id).all()
+    """Get user's upload history with optional filters"""
+    # Get user's own uploads
+    query = db.query(Upload).filter(Upload.user_id == current_user.id)
+    
+    if not include_archived:
+        query = query.filter(Upload.is_archived == False)
+    
+    # Get uploads shared with the user
+    if include_shared:
+        user_id_str = str(current_user.id)
+        # برای SQLite، از LIKE استفاده می‌کنیم
+        shared_query = db.query(Upload).filter(
+            Upload.shared_with.like(f'%{user_id_str}%')
+        )
+        query = query.union(shared_query)
+    
+    uploads = query.order_by(Upload.upload_time.desc()).all()
+    
     history = []
     for upload in uploads:
-        history.append(
-            {
-                "upload_id": upload.id,
-                "filename": upload.filename,
-                "transcription_filename": upload.transcription_filename,
-                "upload_time": upload.upload_time.isoformat(),
-            }
-        )
-
-    logger.info(
-        f"Retrieved history for user: {current_user.username}, total uploads: {len(history)}"
-    )
+        history.append({
+            "upload_id": upload.id,
+            "filename": upload.filename,
+            "transcription_filename": upload.transcription_filename,
+            "upload_time": upload.upload_time.isoformat(),
+            "is_archived": upload.is_archived,
+            "shared_with": upload.get_shared_users()
+        })
+    
     return {"history": history}
 
 @app.get("/get-transcription/{upload_id}")
@@ -446,19 +464,21 @@ async def get_transcription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint to retrieve the transcription text of a specific upload.
-    """
-    upload_record = (
-        db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
-        .first()
-    )
+    """Endpoint to retrieve the transcription text of a specific upload."""
+    # Check if user is owner or has shared access
+    upload_record = db.query(Upload).filter(
+        (Upload.id == upload_id) & 
+        (
+            (Upload.user_id == current_user.id) |  # User is owner
+            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
+        )
+    ).first()
+
     if not upload_record:
         logger.warning(
-            f"Transcription record not found for upload_id: {upload_id} and user: {current_user.username}"
+            f"Transcription record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
         )
-        raise HTTPException(status_code=404, detail="Transcription not found.")
+        raise HTTPException(status_code=404, detail="Transcription not found or access denied.")
 
     transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
     if not os.path.exists(transcription_path):
@@ -573,19 +593,21 @@ async def stream_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Stream an audio file with proper headers for HTML5 audio player.
-    """
-    upload_record = (
-        db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
-        .first()
-    )
+    """Stream an audio file with proper headers for HTML5 audio player."""
+    # Check if user is owner or has shared access
+    upload_record = db.query(Upload).filter(
+        (Upload.id == upload_id) & 
+        (
+            (Upload.user_id == current_user.id) |  # User is owner
+            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
+        )
+    ).first()
+
     if not upload_record:
         logger.warning(
-            f"Audio record not found for upload_id: {upload_id} and user: {current_user.username}"
+            f"Audio record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
         )
-        raise HTTPException(status_code=404, detail="Audio file not found.")
+        raise HTTPException(status_code=404, detail="Audio file not found or access denied.")
 
     audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
     if not os.path.exists(audio_path):
@@ -601,3 +623,97 @@ async def stream_audio(
             "Content-Disposition": f'inline; filename="{upload_record.filename}"',
         },
     )
+@app.post("/toggle-archive/{upload_id}")
+async def toggle_archive_status(
+    upload_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Toggle the archive status of an upload."""
+    upload = db.query(Upload).filter(
+        Upload.id == upload_id,
+        Upload.user_id == current_user.id
+    ).first()
+    
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    upload.is_archived = not upload.is_archived
+    db.commit()
+    
+    return {"message": "Archive status updated", "is_archived": upload.is_archived}
+
+@app.get("/users/")
+async def get_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get list of all users except current user"""
+    users = db.query(User).filter(User.id != current_user.id).all()
+    return {
+        "users": [{"id": user.id, "username": user.username} for user in users]
+    }
+
+@app.post("/share/{upload_id}/user/{user_id}")
+async def share_with_user(
+    upload_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Share an upload with another user"""
+    # Check if upload exists and belongs to current user
+    upload = db.query(Upload).filter(
+        Upload.id == upload_id,
+        Upload.user_id == current_user.id
+    ).first()
+    
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # Check if target user exists
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Add user to shared_with list
+    upload.add_shared_user(user_id)
+    
+    try:
+        db.commit()
+        logger.info(f"Upload {upload_id} shared with user {user_id}")
+    except Exception as e:
+        logger.error(f"Error sharing upload: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to share upload")
+    
+    return {"message": "Upload shared successfully"}
+
+@app.delete("/share/{upload_id}/user/{user_id}")
+async def remove_share(
+    upload_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Remove share access for a user"""
+    upload = db.query(Upload).filter(
+        Upload.id == upload_id,
+        Upload.user_id == current_user.id
+    ).first()
+    
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    
+    # Remove user from shared_with list
+    upload.remove_shared_user(user_id)
+    
+    try:
+        db.commit()
+        logger.info(f"Share access removed for user {user_id} from upload {upload_id}")
+    except Exception as e:
+        logger.error(f"Error removing share access: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to remove share access")
+    
+    return {"message": "Share access removed successfully"}

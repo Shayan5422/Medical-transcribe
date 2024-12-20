@@ -1,6 +1,7 @@
 # schemas.py
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import datetime
 
 class UserCreate(BaseModel):
     username: str
@@ -22,6 +23,14 @@ class UploadHistory(BaseModel):
     filename: str
     transcription_filename: str
     upload_time: str
+    is_archived: bool = False
+    shared_with: List[int] = []
+
+    class Config:
+        from_attributes = True
 
 class UploadHistoryResponse(BaseModel):
     history: List[UploadHistory]
+
+class ShareResponse(BaseModel):
+    share_link: str
