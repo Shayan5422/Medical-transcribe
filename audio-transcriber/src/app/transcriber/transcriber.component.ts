@@ -8,6 +8,7 @@ import { AudioPlayerComponent } from './audio-player.component';
 import { UserFilterPipe } from './user-filter.pipe';
 import { ClickOutsideDirective } from './click-outside.directive';
 import { PricingComponent } from './pricing.component';
+import { catchError, EMPTY } from 'rxjs';
 
 
 interface User {
@@ -23,6 +24,7 @@ interface UploadHistory {
   is_archived: boolean;
   shared_with: number[];
   showMenu?: boolean;
+  owner_id: number;  // Add this line
 }
 
 @Component({
@@ -59,6 +61,7 @@ export class TranscriberComponent implements OnInit {
   selectedUploadForShare: number | null = null;
   searchQuery: string = '';
   showSharedRecords: boolean = false;
+  private currentUserId: number | null = null;
 
 
   
@@ -87,11 +90,14 @@ export class TranscriberComponent implements OnInit {
     this.token = localStorage.getItem('token');
     console.log('Token récupéré :', this.token);
     if (this.token) {
+      // Remove fetchCurrentUser call and just fetch history and users
       this.fetchHistory();
+      this.fetchUsers();
     } else {
       console.log('Aucun token trouvé, redirection vers la page de connexion.');
       this.router.navigate(['/login']);
     }
+    
     window.addEventListener('resize', () => {
       if (window.innerWidth >= 768) { // md breakpoint
         this.isSidebarOpen = false;
@@ -103,7 +109,7 @@ export class TranscriberComponent implements OnInit {
       this.currentTheme = savedTheme;
     }
     document.documentElement.setAttribute('data-theme', this.currentTheme);
-  }
+}
   toggleSidebar(): void {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
@@ -123,39 +129,35 @@ export class TranscriberComponent implements OnInit {
   }
 
   shareWithUser(userId: number): void {
-    if (!this.selectedUploadForShare) return;
+    if (!this.selectedUploadForShare) {
+        console.error('No upload selected for sharing');
+        return;
+    }
 
     const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
+        'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.post(`/api/share/${this.selectedUploadForShare}/user/${userId}`, {}, { headers }).subscribe(
-      () => {
+    this.http.post(
+        `/api/share/${this.selectedUploadForShare}/user/${userId}`, 
+        {}, 
+        { headers }
+    ).pipe(
+        catchError(error => {
+            console.error('Error sharing:', error);
+            alert('Erreur lors du partage');
+            return EMPTY;
+        })
+    ).subscribe(() => {
         this.fetchHistory();
+        this.fetchUsers();  // Refresh users list after sharing
         alert('Transcription partagée avec succès');
-      },
-      error => {
-        console.error('Error sharing:', error);
-        alert('Erreur lors du partage');
-      }
-    );
-  }
-
-  removeShare(uploadId: number, userId: number): void {
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
+        this.closeShareModal();
     });
+}
 
-    this.http.delete(`/api/share/${uploadId}/user/${userId}`, { headers }).subscribe(
-      () => {
-        this.fetchHistory();
-      },
-      error => {
-        console.error('Error removing share:', error);
-        alert('Erreur lors de la suppression du partage');
-      }
-    );
-  }
+
+  
 
   toggleTheme(): void {
     this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
@@ -452,43 +454,70 @@ uploadAudio(file: File): void {
 
   downloadTranscriptionFile(upload_id: number): void {
     const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
+        'Authorization': `Bearer ${this.token}`
     });
 
     const url = `/api/download-transcription/${upload_id}`;
-    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
-      const a = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      a.href = objectUrl;
-      a.download = `Patient_${upload_id}.txt`; // تغییر نام فایل
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-      console.log(`Fichier de transcription Patient_${upload_id}.txt téléchargé.`);
-    }, error => {
-      console.error('Erreur lors du téléchargement du fichier de transcription :', error);
-      alert('Erreur lors du téléchargement du fichier de transcription.');
-    });
-  }
+    this.http.get(url, { 
+        headers, 
+        responseType: 'blob',
+        observe: 'response' 
+    }).subscribe(
+        response => {
+            const blob = new Blob([response.body!], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Patient_${upload_id}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        },
+        error => {
+            console.error('Error downloading transcription file:', error);
+            if (error.status === 404) {
+                alert('Fichier de transcription non trouvé ou accès refusé');
+            } else {
+                alert('Erreur lors du téléchargement du fichier de transcription');
+            }
+        }
+    );
+}
 
-  downloadAudioFile(upload_id: number): void {
-    const headers = new HttpHeaders({
+
+downloadAudioFile(upload_id: number): void {
+  const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
-    });
+  });
 
-    const url = `/api/download-audio/${upload_id}`;
-    this.http.get(url, { headers, responseType: 'blob' }).subscribe(blob => {
-      const a = document.createElement('a');
-      const objectUrl = URL.createObjectURL(blob);
-      a.href = objectUrl;
-      a.download = `Patient_${upload_id}.wav`; // تغییر نام فایل
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-      console.log(`Fichier audio Patient_${upload_id}.wav téléchargé.`);
-    }, error => {
-      console.error('Erreur lors du téléchargement du fichier audio :', error);
-      alert('Erreur lors du téléchargement du fichier audio.');
-    });
-  }
+  const url = `/api/download-audio/${upload_id}`;
+  this.http.get(url, { 
+      headers, 
+      responseType: 'blob',
+      observe: 'response'
+  }).subscribe(
+      response => {
+          const blob = new Blob([response.body!], { type: 'audio/wav' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Patient_${upload_id}.wav`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+      },
+      error => {
+          console.error('Error downloading audio file:', error);
+          if (error.status === 404) {
+              alert('Fichier audio non trouvé ou accès refusé');
+          } else {
+              alert('Erreur lors du téléchargement du fichier audio');
+          }
+      }
+  );
+}
 
   // دانلود ترنسکریپشن به صورت PDF با نام بیمار
   downloadTranscriptionAsPDF(upload_id: number): void {
@@ -528,16 +557,27 @@ uploadAudio(file: File): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
-
-    this.http.post(`/api/toggle-archive/${upload_id}`, {}, { headers }).subscribe(
-      () => {
-        this.fetchHistory();
-      },
-      error => {
-        console.error('Error toggling archive status:', error);
-        alert('Erreur lors de la mise à jour du statut d\'archive');
-      }
-    );
+  
+    this.http.post(`/api/toggle-archive/${upload_id}`, {}, { headers })
+      .pipe(
+        catchError(error => {
+          console.error('Error toggling archive status:', error);
+          if (error.status === 404) {
+            alert('Enregistrement non trouvé ou permission refusée');
+          } else {
+            alert('Erreur lors de la mise à jour du statut d\'archive');
+          }
+          return EMPTY;
+        })
+      )
+      .subscribe(
+        (response: any) => {
+          this.fetchHistory();
+          // اختیاری: نمایش پیام موفقیت‌آمیز
+          const status = response.is_archived ? 'archivé' : 'désarchivé';
+          alert(`L'enregistrement a été ${status} avec succès`);
+        }
+      );
   }
 
   fetchHistory(): void {
@@ -557,6 +597,8 @@ uploadAudio(file: File): void {
       response => {
         this.ngZone.run(() => {
           this.history = response.history;
+          this.currentUserId = response.current_user_id;  // Get current user ID from history response
+          this.fetchUsers();  // Fetch users after getting history
         });
       },
       error => {
@@ -573,14 +615,60 @@ uploadAudio(file: File): void {
   getUserName(userId: number): string {
     const user = this.users.find(u => u.id === userId);
     return user ? user.username : `User ${userId}`;
-  }
+}
 
   toggleShowArchived(): void {
     this.showArchived = !this.showArchived;
     this.fetchHistory();
   }
 
+  removeShare(uploadId: number, userId: number): void {
+    const headers = new HttpHeaders({
+        'Authorization': `Bearer ${this.token}`
+    });
+
+    this.http.delete(`/api/share/${uploadId}/user/${userId}`, { headers })
+        .pipe(
+            catchError(error => {
+                console.error('Error removing share:', error);
+                alert('Erreur lors de la suppression du partage');
+                return EMPTY;
+            })
+        )
+        .subscribe(() => {
+            this.fetchHistory();
+            this.fetchUsers();  // Refresh users list after removing share
+        });
+    }
+    fetchCurrentUser(): void {
+      const headers = new HttpHeaders({
+        'Authorization': `Bearer ${this.token}`
+      });
   
-}
+      this.http.get<any>('/api/current-user/', { headers }).subscribe(
+        response => {
+          this.currentUserId = response.id;
+        },
+        error => {
+          console.error('Error fetching current user:', error);
+        }
+      );
+    }
+  
+    getCurrentUserId(): number | null {
+      return this.currentUserId;
+    }
+  
+    isOwner(record: UploadHistory): boolean {
+      return record.owner_id === this.currentUserId;
+    }
+  
+    // Method to determine if the current user should see the remove button
+    canRemoveShare(record: UploadHistory): boolean {
+      return record.owner_id === this.currentUserId;
+    }
+  }
+  
+
 
 

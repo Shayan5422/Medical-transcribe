@@ -363,31 +363,32 @@ async def download_transcription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Endpoint to download the transcription of a specific upload."""
-    upload_record = db.query(Upload).filter(
+    """Endpoint to download the transcription of a specific upload.
+    Allows access for both owners and users with shared access."""
+    
+    # Check if user is owner or has shared access
+    upload = db.query(Upload).filter(
         (Upload.id == upload_id) & 
         (
             (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
+            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
         )
     ).first()
 
-    if not upload_record:
-        logger.warning(
-            f"Transcription record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
+    if not upload:
+        raise HTTPException(
+            status_code=404, 
+            detail="Transcription not found or access denied"
         )
-        raise HTTPException(status_code=404, detail="Transcription file not found or access denied.")
 
-    transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
+    transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
-        logger.warning(f"Transcription file not found: {upload_record.transcription_filename}")
-        raise HTTPException(status_code=404, detail="Transcription file not found.")
+        raise HTTPException(status_code=404, detail="Transcription file not found")
 
-    logger.info(f"Transcription file found: {upload_record.transcription_filename}")
     return FileResponse(
         transcription_path, 
         media_type="text/plain", 
-        filename=upload_record.transcription_filename
+        filename=f"Patient_{upload_id}.txt"
     )
 
 @app.get("/download-audio/{upload_id}")
@@ -396,28 +397,32 @@ async def download_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Endpoint to download the original audio file of a specific upload.
-    """
-    upload_record = (
-        db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
-        .first()
-    )
-    if not upload_record:
-        logger.warning(
-            f"Audio record not found for upload_id: {upload_id} and user: {current_user.username}"
+    """Endpoint to download the audio file.
+    Allows access for both owners and users with shared access."""
+    
+    # Check if user is owner or has shared access
+    upload = db.query(Upload).filter(
+        (Upload.id == upload_id) & 
+        (
+            (Upload.user_id == current_user.id) |  # User is owner
+            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
         )
-        raise HTTPException(status_code=404, detail="Audio file not found.")
+    ).first()
 
-    audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
+    if not upload:
+        raise HTTPException(
+            status_code=404, 
+            detail="Audio file not found or access denied"
+        )
+
+    audio_path = os.path.join(AUDIO_DIR, upload.filename)
     if not os.path.exists(audio_path):
-        logger.warning(f"Audio file not found: {upload_record.filename}")
-        raise HTTPException(status_code=404, detail="Audio file not found.")
+        raise HTTPException(status_code=404, detail="Audio file not found")
 
-    logger.info(f"Audio file found: {upload_record.filename}")
     return FileResponse(
-        audio_path, media_type="audio/wav", filename=upload_record.filename
+        audio_path,
+        media_type="audio/wav",
+        filename=f"Patient_{upload_id}.wav"
     )
 
 @app.get("/history/", response_model=UploadHistoryResponse)
@@ -429,19 +434,22 @@ async def get_history(
 ):
     """Get user's upload history with optional filters"""
     # Get user's own uploads
-    query = db.query(Upload).filter(Upload.user_id == current_user.id)
+    query = db.query(Upload)
     
+    if include_shared:
+        # Get both owned and shared uploads
+        query = query.filter(
+            or_(
+                Upload.user_id == current_user.id,
+                Upload.shared_with.like(f'%{current_user.id}%')
+            )
+        )
+    else:
+        # Get only owned uploads
+        query = query.filter(Upload.user_id == current_user.id)
+
     if not include_archived:
         query = query.filter(Upload.is_archived == False)
-    
-    # Get uploads shared with the user
-    if include_shared:
-        user_id_str = str(current_user.id)
-        # برای SQLite، از LIKE استفاده می‌کنیم
-        shared_query = db.query(Upload).filter(
-            Upload.shared_with.like(f'%{user_id_str}%')
-        )
-        query = query.union(shared_query)
     
     uploads = query.order_by(Upload.upload_time.desc()).all()
     
@@ -453,10 +461,14 @@ async def get_history(
             "transcription_filename": upload.transcription_filename,
             "upload_time": upload.upload_time.isoformat(),
             "is_archived": upload.is_archived,
-            "shared_with": upload.get_shared_users()
+            "shared_with": upload.get_shared_users(),
+            "owner_id": upload.user_id  # Add owner_id to each record
         })
     
-    return {"history": history}
+    return {
+        "history": history,
+        "current_user_id": current_user.id  # Include current user's ID
+    }
 
 @app.get("/get-transcription/{upload_id}")
 async def get_transcription(
@@ -465,25 +477,17 @@ async def get_transcription(
     db: Session = Depends(get_db),
 ):
     """Endpoint to retrieve the transcription text of a specific upload."""
-    # Check if user is owner or has shared access
-    upload_record = db.query(Upload).filter(
-        (Upload.id == upload_id) & 
-        (
-            (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
-        )
-    ).first()
+    upload = db.query(Upload).filter(Upload.id == upload_id).first()
+    
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+        
+    if not upload.has_access(current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    if not upload_record:
-        logger.warning(
-            f"Transcription record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
-        )
-        raise HTTPException(status_code=404, detail="Transcription not found or access denied.")
-
-    transcription_path = os.path.join(AUDIO_DIR, upload_record.transcription_filename)
+    transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
-        logger.warning(f"Transcription file not found: {upload_record.transcription_filename}")
-        raise HTTPException(status_code=404, detail="Transcription file not found.")
+        raise HTTPException(status_code=404, detail="Transcription file not found")
 
     try:
         async with aiofiles.open(transcription_path, "r", encoding="utf-8") as f:
@@ -491,7 +495,7 @@ async def get_transcription(
         logger.info(f"Retrieved transcription for upload_id: {upload_id}")
     except Exception as e:
         logger.error(f"Error reading transcription file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to read transcription file.")
+        raise HTTPException(status_code=500, detail="Failed to read transcription file")
 
     return {"transcription": transcription}
 
@@ -593,36 +597,37 @@ async def stream_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Stream an audio file with proper headers for HTML5 audio player."""
+    """Stream an audio file with proper headers for HTML5 audio player.
+    Allows access for both owners and users with shared access."""
+    
     # Check if user is owner or has shared access
-    upload_record = db.query(Upload).filter(
+    upload = db.query(Upload).filter(
         (Upload.id == upload_id) & 
         (
             (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.contains(str([current_user.id])))  # User has shared access
+            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
         )
     ).first()
 
-    if not upload_record:
-        logger.warning(
-            f"Audio record not found or access denied for upload_id: {upload_id} and user: {current_user.username}"
+    if not upload:
+        raise HTTPException(
+            status_code=404, 
+            detail="Audio file not found or access denied"
         )
-        raise HTTPException(status_code=404, detail="Audio file not found or access denied.")
 
-    audio_path = os.path.join(AUDIO_DIR, upload_record.filename)
+    audio_path = os.path.join(AUDIO_DIR, upload.filename)
     if not os.path.exists(audio_path):
-        logger.warning(f"Audio file not found: {upload_record.filename}")
-        raise HTTPException(status_code=404, detail="Audio file not found.")
+        raise HTTPException(status_code=404, detail="Audio file not found")
 
-    logger.info(f"Streaming audio file: {upload_record.filename}")
     return FileResponse(
         audio_path,
         media_type="audio/wav",
         headers={
             "Accept-Ranges": "bytes",
-            "Content-Disposition": f'inline; filename="{upload_record.filename}"',
-        },
+            "Content-Disposition": f'inline; filename="{upload.filename}"',
+        }
     )
+
 @app.post("/toggle-archive/{upload_id}")
 async def toggle_archive_status(
     upload_id: int,
@@ -630,18 +635,30 @@ async def toggle_archive_status(
     db: Session = Depends(get_db)
 ):
     """Toggle the archive status of an upload."""
+    # Check if user is owner or has shared access
     upload = db.query(Upload).filter(
-        Upload.id == upload_id,
-        Upload.user_id == current_user.id
+        (Upload.id == upload_id) & 
+        (
+            (Upload.user_id == current_user.id) |
+            (Upload.shared_with.like(f'%{current_user.id}%'))  # Check shared access
+        )
     ).first()
     
     if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
+        raise HTTPException(
+            status_code=404, 
+            detail="Upload not found or you don't have permission to access it"
+        )
     
-    upload.is_archived = not upload.is_archived
-    db.commit()
-    
-    return {"message": "Archive status updated", "is_archived": upload.is_archived}
+    try:
+        upload.is_archived = not upload.is_archived
+        db.commit()
+        logger.info(f"Archive status toggled for upload {upload_id} by user {current_user.id}")
+        return {"message": "Archive status updated", "is_archived": upload.is_archived}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error toggling archive status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update archive status")
 
 @app.get("/users/")
 async def get_users(
@@ -676,18 +693,16 @@ async def share_with_user(
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Add user to shared_with list
-    upload.add_shared_user(user_id)
-    
     try:
+        # Add user to shared_with list
+        upload.add_shared_user(user_id)
         db.commit()
         logger.info(f"Upload {upload_id} shared with user {user_id}")
+        return {"message": "Upload shared successfully"}
     except Exception as e:
-        logger.error(f"Error sharing upload: {e}")
         db.rollback()
+        logger.error(f"Error sharing upload: {e}")
         raise HTTPException(status_code=500, detail="Failed to share upload")
-    
-    return {"message": "Upload shared successfully"}
 
 @app.delete("/share/{upload_id}/user/{user_id}")
 async def remove_share(

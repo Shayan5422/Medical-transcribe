@@ -15,6 +15,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     uploads = relationship("Upload", back_populates="owner")
 
+# In models.py
 class Upload(Base):
     __tablename__ = 'uploads'
     
@@ -50,3 +51,7 @@ class Upload(Base):
         if user_id in current_users:
             current_users.remove(user_id)
             self.shared_with = json.dumps(current_users)
+
+    def has_access(self, user_id: int) -> bool:
+        """Check if a user has access to this upload"""
+        return user_id == self.user_id or user_id in self.get_shared_users()
