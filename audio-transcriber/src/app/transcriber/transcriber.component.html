@@ -87,7 +87,7 @@
                     <span class="font-bold">Heure : </span>{{ record.upload_time | date:'short' }}
                   </div>
                   <!-- Shared users list -->
-                  <div *ngIf="getSharedWith(record).length > 0" class="mt-1 text-xs text-gray-600">
+                  <!-- <div *ngIf="getSharedWith(record).length > 0" class="mt-1 text-xs text-gray-600">
                     <span class="font-bold">Partagé avec : </span>
                     <div class="flex flex-wrap gap-1 mt-1">
                       <span 
@@ -100,8 +100,8 @@
                           ×
                         </button>
                       </span>
-                    </div>
-                  </div>
+                    </div> -->
+                  <!-- </div> -->
                 </button>
 
                 <!-- Three-dot menu -->
@@ -123,7 +123,7 @@
                     (clickOutside)="record.showMenu = false">
                     <div class="py-1">
                       <!-- Share button -->
-                      <button 
+                      <!-- <button 
                         class="w-full px-4 py-2 text-sm text-left hover:bg-base-200 flex items-center gap-2"
                         (click)="openShareModal(record.upload_id); record.showMenu = false; $event.stopPropagation()">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -134,7 +134,7 @@
                           <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
                         </svg>
                         Partager
-                      </button>
+                      </button> -->
 
                       <!-- Archive button -->
                       <button 
