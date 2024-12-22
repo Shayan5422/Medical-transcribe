@@ -16,7 +16,7 @@ Welcome to **Medical Transcribe**, a comprehensive solution for transcribing med
     - [Windows](#windows-1)
 - [Usage](#usage)
 - [Contributing](#contributing)
-- [License](#license)
+
 
 ## Prerequisites
 
