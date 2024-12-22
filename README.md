@@ -264,10 +264,3 @@ Before you begin, ensure you have the following installed:
 
 Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
 
-## License
-
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-*Feel free to customize this README to better fit your project's specifics and repository structure.*
