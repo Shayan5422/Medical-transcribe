@@ -85,7 +85,7 @@
     </span>
   </div>
   <!-- Add owner information for shared records -->
-  <div *ngIf="record.owner_id !== getCurrentUserId()" class="text-xs text-gray-600">
+  <div *ngIf="record.owner_id !== getCurrentUserId() " class="text-xs text-gray-600">
     <span class="font-bold">Propriétaire : </span>
     <span>{{ getUserName(record.owner_id) }}</span>
   </div>

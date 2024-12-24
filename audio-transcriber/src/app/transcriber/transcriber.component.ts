@@ -118,7 +118,7 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<{users: User[]}>('/api/users/', { headers }).subscribe(
+    this.http.get<{users: User[]}>('http://127.0.0.1:8000/users/', { headers }).subscribe(
       response => {
         this.users = response.users;
       },
@@ -139,7 +139,7 @@ export class TranscriberComponent implements OnInit {
     });
 
     this.http.post(
-        `/api/share/${this.selectedUploadForShare}/user/${userId}`, 
+        `http://127.0.0.1:8000/share/${this.selectedUploadForShare}/user/${userId}`, 
         {}, 
         { headers }
     ).pipe(
@@ -167,7 +167,7 @@ export class TranscriberComponent implements OnInit {
     localStorage.setItem('theme', this.currentTheme);
   }
   private getAudioStreamUrl(uploadId: number): string {
-    return `/api/stream-audio/${uploadId}`;
+    return `http://127.0.0.1:8000/stream-audio/${uploadId}`;
   }
   // Gérer la sélection de fichier
   onFileSelected(event: any): void {
@@ -208,13 +208,13 @@ export class TranscriberComponent implements OnInit {
     this.transcription = null;
 
     // Set new audio stream URL
-    this.audioStreamUrl = `/api/stream-audio/${upload_id}`;
+    this.audioStreamUrl = `http://127.0.0.1:8000/stream-audio/${upload_id}`;
 
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<any>(`/api/get-transcription/${upload_id}`, { headers }).subscribe(
+    this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
@@ -248,7 +248,7 @@ uploadAudio(file: File): void {
     this.audioStreamUrl = null; // Reset audio URL
   });
 
-  this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
+  this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
     response => {
       console.log('Réponse de transcription :', response);
       this.ngZone.run(() => {
@@ -257,7 +257,7 @@ uploadAudio(file: File): void {
         this.isTranscribing = false;
         
         this.selectedUploadId = response.upload_id; 
-        this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`; 
+        this.audioStreamUrl = `http://127.0.0.1:8000/stream-audio/${response.upload_id}`; 
       });
       
       console.log('Transcription définie :', this.transcription);
@@ -373,7 +373,7 @@ uploadAudio(file: File): void {
         'Authorization': `Bearer ${this.token}`
       });
 
-      this.http.delete(`/api/history/${upload_id}`, { headers }).subscribe(
+      this.http.delete(`http://127.0.0.1:8000/history/${upload_id}`, { headers }).subscribe(
         () => {
           this.fetchHistory();
           if (this.selectedUploadId === upload_id) {
@@ -405,7 +405,7 @@ uploadAudio(file: File): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.put(`/api/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
+    this.http.put(`http://127.0.0.1:8000/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
         this.selectedTranscription = this.editedTranscription;
         this.isEditing = false;
@@ -457,7 +457,7 @@ uploadAudio(file: File): void {
         'Authorization': `Bearer ${this.token}`
     });
 
-    const url = `/api/download-transcription/${upload_id}`;
+    const url = `http://127.0.0.1:8000/download-transcription/${upload_id}`;
     this.http.get(url, { 
         headers, 
         responseType: 'blob',
@@ -491,7 +491,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
   });
 
-  const url = `/api/download-audio/${upload_id}`;
+  const url = `http://127.0.0.1:8000/download-audio/${upload_id}`;
   this.http.get(url, { 
       headers, 
       responseType: 'blob',
@@ -558,7 +558,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
   
-    this.http.post(`/api/toggle-archive/${upload_id}`, {}, { headers })
+    this.http.post(`http://127.0.0.1:8000/toggle-archive/${upload_id}`, {}, { headers })
       .pipe(
         catchError(error => {
           console.error('Error toggling archive status:', error);
@@ -585,7 +585,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
   
-    let url = '/api/history/';
+    let url = 'http://127.0.0.1:8000/history/';
     if (this.showArchived) {
       url += '?include_archived=true';
     }
@@ -627,7 +627,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.delete(`/api/share/${uploadId}/user/${userId}`, { headers })
+    this.http.delete(`http://127.0.0.1:8000/share/${uploadId}/user/${userId}`, { headers })
         .pipe(
             catchError(error => {
                 console.error('Error removing share:', error);
@@ -645,7 +645,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
       });
   
-      this.http.get<any>('/api/current-user/', { headers }).subscribe(
+      this.http.get<any>('http://127.0.0.1:8000/current-user/', { headers }).subscribe(
         response => {
           this.currentUserId = response.id;
         },
