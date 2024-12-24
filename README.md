@@ -49,7 +49,7 @@ Before you begin, ensure you have the following installed:
 3. **Clone the repository and navigate to the backend directory:**
 
     ```bash
-    git clone https://github.com/yourusername/Medical-transcribe.git
+    git clone https://github.com/Shayan5422/Medical-transcribe.git
     cd Medical-transcribe
     ```
 
@@ -97,7 +97,7 @@ Before you begin, ensure you have the following installed:
 4. **Clone the repository and navigate to the backend directory:**
 
     ```bash
-    git clone https://github.com/yourusername/Medical-transcribe.git
+    git clone https://github.com/Shayan5422/Medical-transcribe.git
     cd Medical-transcribe
     ```
 
@@ -146,7 +146,7 @@ Before you begin, ensure you have the following installed:
 3. **Clone the repository and navigate to the backend directory:**
 
     ```cmd
-    git clone https://github.com/yourusername/Medical-transcribe.git
+    git clone https://github.com/Shayan5422/Medical-transcribe.git
     cd Medical-transcribe
     ```
 
