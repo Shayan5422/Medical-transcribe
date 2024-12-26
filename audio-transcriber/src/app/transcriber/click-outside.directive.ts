@@ -1,24 +1,21 @@
-// click-outside.directive.ts
-import { Directive, ElementRef, EventEmitter, Output } from '@angular/core';
+// src/app/click-outside.directive.ts
+
+import { Directive, ElementRef, EventEmitter, HostListener, Output } from '@angular/core';
 
 @Directive({
   selector: '[clickOutside]',
-  standalone: true // Make the directive standalone
+  standalone: true
 })
 export class ClickOutsideDirective {
   @Output() clickOutside = new EventEmitter<void>();
 
-  constructor(private elementRef: ElementRef) {
-    document.addEventListener('click', this.handleClick.bind(this));
-  }
+  constructor(private elementRef: ElementRef) {}
 
-  handleClick(event: MouseEvent) {
-    if (!this.elementRef.nativeElement.contains(event.target)) {
+  @HostListener('document:click', ['$event.target'])
+  public onClick(targetElement: HTMLElement) {
+    const clickedInside = this.elementRef.nativeElement.contains(targetElement);
+    if (!clickedInside) {
       this.clickOutside.emit();
     }
-  }
-
-  ngOnDestroy() {
-    document.removeEventListener('click', this.handleClick.bind(this));
   }
 }

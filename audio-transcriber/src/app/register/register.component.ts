@@ -45,7 +45,7 @@ export class RegisterComponent implements OnInit {
       referralCode: this.referralCode // Envoi du code de parrainage au serveur (optionnel)
     };
 
-    this.http.post<any>('http://127.0.0.1:8000/register/', registerData).subscribe(
+    this.http.post<any>('/api/register/', registerData).subscribe(
       (response) => {
         this.successMessage = 'Inscription réussie. Vous pouvez maintenant vous connecter.';
         this.errorMessage = '';

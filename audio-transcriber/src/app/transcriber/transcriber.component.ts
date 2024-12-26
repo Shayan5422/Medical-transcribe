@@ -9,11 +9,26 @@ import { UserFilterPipe } from './user-filter.pipe';
 import { ClickOutsideDirective } from './click-outside.directive';
 import { PricingComponent } from './pricing.component';
 import { catchError, EMPTY } from 'rxjs';
+import { User } from './user.model';
 
 
-interface User {
+
+
+interface ShareCreate {
+  user_id: number;
+  access_type: string;
+}
+
+interface ShareResponse {
   id: number;
-  username: string;
+  upload_id: number;
+  user_id: number;
+  access_type: string;
+}
+
+interface ShareInfo {
+  user_id: number;
+  access_type: string;
 }
 
 interface UploadHistory {
@@ -22,9 +37,9 @@ interface UploadHistory {
   transcription_filename: string;
   upload_time: string;
   is_archived: boolean;
-  shared_with: number[];
+  shared_with: ShareInfo[];
+  owner_id: number;
   showMenu?: boolean;
-  owner_id: number;  // Add this line
 }
 
 @Component({
@@ -41,9 +56,9 @@ export class TranscriberComponent implements OnInit {
   isRecording: boolean = false;
   isTranscribing: boolean = false;
   mediaRecorder: MediaRecorder | null = null;
-  mediaStream: MediaStream | null = null; // Ajouté pour gérer le flux média
+  mediaStream: MediaStream | null = null;
   audioChunks: Blob[] = [];
-  selectedFile: File | null = null; // Fichier sélectionné
+  selectedFile: File | null = null;
   history: UploadHistory[] = [];
   token: string | null = null;
   selectedUploadId: number | null = null;
@@ -61,7 +76,10 @@ export class TranscriberComponent implements OnInit {
   selectedUploadForShare: number | null = null;
   searchQuery: string = '';
   showSharedRecords: boolean = false;
-  private currentUserId: number | null = null;
+  currentUserId: number | null = null;
+  isEditor: boolean = false; // Variable pour gérer le rôle d'éditeur
+  
+
 
 
   
@@ -71,66 +89,63 @@ export class TranscriberComponent implements OnInit {
     private ngZone: NgZone // Injecter NgZone
   ) {}
 
-  openShareModal(upload_id: number): void {
-    this.selectedUploadForShare = upload_id;
-    this.showShareModal = true;
-    this.fetchUsers();
-  }
+  
 
-  closeShareModal(): void {
-    this.showShareModal = false;
-    this.selectedUploadForShare = null;
-    this.searchQuery = '';
-  }
+  
   getSharedWith(record: UploadHistory): number[] {
-    return record.shared_with || [];
+    return (record.shared_with || []).map(share => share.user_id);
   }
   
   ngOnInit(): void {
     this.token = localStorage.getItem('token');
     console.log('Token récupéré :', this.token);
     if (this.token) {
-      // Remove fetchCurrentUser call and just fetch history and users
       this.fetchHistory();
       this.fetchUsers();
     } else {
       console.log('Aucun token trouvé, redirection vers la page de connexion.');
       this.router.navigate(['/login']);
     }
-    
+
     window.addEventListener('resize', () => {
-      if (window.innerWidth >= 768) { // md breakpoint
+      if (window.innerWidth >= 768) { // breakpoint md
         this.isSidebarOpen = false;
       }
     });
-    
+
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
       this.currentTheme = savedTheme;
     }
     document.documentElement.setAttribute('data-theme', this.currentTheme);
-}
+  }
+
   toggleSidebar(): void {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
+
   fetchUsers(): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<{users: User[]}>('http://127.0.0.1:8000/users/', { headers }).subscribe(
+    this.http.get<{users: User[]}>('/api/users/', { headers }).subscribe(
       response => {
-        this.users = response.users;
+        // Initialiser accessType pour chaque utilisateur
+        this.users = response.users.map(user => ({
+          ...user,
+          accessType: user.accessType || 'viewer' // Valeur par défaut si non défini
+        }));
       },
       error => {
-        console.error('Error fetching users:', error);
+        console.error('Erreur lors de la récupération des utilisateurs:', error);
       }
     );
   }
 
-  shareWithUser(userId: number): void {
+  shareWithUser(userId: number, accessType: 'viewer' | 'editor'): void {
     if (!this.selectedUploadForShare) {
-        console.error('No upload selected for sharing');
+        console.error('Aucun enregistrement sélectionné pour le partage');
         return;
     }
 
@@ -138,26 +153,41 @@ export class TranscriberComponent implements OnInit {
         'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.post(
-        `http://127.0.0.1:8000/share/${this.selectedUploadForShare}/user/${userId}`, 
-        {}, 
+    const payload: ShareCreate = {
+        user_id: userId,
+        access_type: accessType
+    };
+
+    this.http.post<ShareResponse>(
+        `/api/share/${this.selectedUploadForShare}/user/`, 
+        payload, 
         { headers }
     ).pipe(
         catchError(error => {
-            console.error('Error sharing:', error);
+            console.error('Erreur lors du partage:', error);
             alert('Erreur lors du partage');
             return EMPTY;
         })
     ).subscribe(() => {
         this.fetchHistory();
-        this.fetchUsers();  // Refresh users list after sharing
+        this.fetchUsers();  // Rafraîchir la liste des utilisateurs après partage
         alert('Transcription partagée avec succès');
         this.closeShareModal();
     });
-}
+  }
 
 
-  
+  closeShareModal(): void {
+    this.showShareModal = false;
+    this.selectedUploadForShare = null;
+    this.searchQuery = '';
+  }
+
+  openShareModal(upload_id: number): void {
+    this.selectedUploadForShare = upload_id;
+    this.showShareModal = true;
+    this.fetchUsers();
+  }
 
   toggleTheme(): void {
     this.currentTheme = this.currentTheme === 'light' ? 'dark' : 'light';
@@ -167,7 +197,7 @@ export class TranscriberComponent implements OnInit {
     localStorage.setItem('theme', this.currentTheme);
   }
   private getAudioStreamUrl(uploadId: number): string {
-    return `http://127.0.0.1:8000/stream-audio/${uploadId}`;
+    return `/api/stream-audio/${uploadId}`;
   }
   // Gérer la sélection de fichier
   onFileSelected(event: any): void {
@@ -208,16 +238,17 @@ export class TranscriberComponent implements OnInit {
     this.transcription = null;
 
     // Set new audio stream URL
-    this.audioStreamUrl = `http://127.0.0.1:8000/stream-audio/${upload_id}`;
+    this.audioStreamUrl = `/api/stream-audio/${upload_id}`;
 
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<any>(`http://127.0.0.1:8000/get-transcription/${upload_id}`, { headers }).subscribe(
+    this.http.get<any>(`/api/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
+          this.isEditor = response.is_editor; // Mettre à jour le rôle
         });
       },
       error => {
@@ -248,7 +279,7 @@ uploadAudio(file: File): void {
     this.audioStreamUrl = null; // Reset audio URL
   });
 
-  this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
+  this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
     response => {
       console.log('Réponse de transcription :', response);
       this.ngZone.run(() => {
@@ -257,7 +288,7 @@ uploadAudio(file: File): void {
         this.isTranscribing = false;
         
         this.selectedUploadId = response.upload_id; 
-        this.audioStreamUrl = `http://127.0.0.1:8000/stream-audio/${response.upload_id}`; 
+        this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`; 
       });
       
       console.log('Transcription définie :', this.transcription);
@@ -373,7 +404,7 @@ uploadAudio(file: File): void {
         'Authorization': `Bearer ${this.token}`
       });
 
-      this.http.delete(`http://127.0.0.1:8000/history/${upload_id}`, { headers }).subscribe(
+      this.http.delete(`/api/history/${upload_id}`, { headers }).subscribe(
         () => {
           this.fetchHistory();
           if (this.selectedUploadId === upload_id) {
@@ -395,6 +426,7 @@ uploadAudio(file: File): void {
     this.editedTranscription = this.selectedTranscription || '';
   }
 
+  
   saveTranscription(): void {
     if (!this.selectedUploadId) return;
 
@@ -405,11 +437,12 @@ uploadAudio(file: File): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.put(`http://127.0.0.1:8000/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
+    this.http.put(`/api/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
         this.selectedTranscription = this.editedTranscription;
         this.isEditing = false;
-        
+        this.isEditor = false; // Désactiver le mode éditeur après enregistrement
+        this.fetchHistory(); // Rafraîchir l'historique pour refléter les changements
       },
       error => {
         console.error('Erreur lors de la mise à jour:', error);
@@ -417,6 +450,7 @@ uploadAudio(file: File): void {
       }
     );
   }
+
 
   copyTranscription(): void {
     const text = this.transcription || this.selectedTranscription;
@@ -457,7 +491,7 @@ uploadAudio(file: File): void {
         'Authorization': `Bearer ${this.token}`
     });
 
-    const url = `http://127.0.0.1:8000/download-transcription/${upload_id}`;
+    const url = `/api/download-transcription/${upload_id}`;
     this.http.get(url, { 
         headers, 
         responseType: 'blob',
@@ -491,7 +525,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
   });
 
-  const url = `http://127.0.0.1:8000/download-audio/${upload_id}`;
+  const url = `/api/download-audio/${upload_id}`;
   this.http.get(url, { 
       headers, 
       responseType: 'blob',
@@ -558,7 +592,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
   
-    this.http.post(`http://127.0.0.1:8000/toggle-archive/${upload_id}`, {}, { headers })
+    this.http.post(`/api/toggle-archive/${upload_id}`, {}, { headers })
       .pipe(
         catchError(error => {
           console.error('Error toggling archive status:', error);
@@ -584,8 +618,8 @@ downloadAudioFile(upload_id: number): void {
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
-  
-    let url = 'http://127.0.0.1:8000/history/';
+
+    let url = '/api/history/';
     if (this.showArchived) {
       url += '?include_archived=true';
     }
@@ -596,13 +630,17 @@ downloadAudioFile(upload_id: number): void {
     this.http.get<any>(url, { headers }).subscribe(
       response => {
         this.ngZone.run(() => {
-          this.history = response.history;
-          this.currentUserId = response.current_user_id;  // Get current user ID from history response
-          this.fetchUsers();  // Fetch users after getting history
+          this.history = response.history.map((record: any) => ({
+            ...record,
+            shared_with: record.shared_with || [],
+            showMenu: false
+          }));
+          this.currentUserId = response.current_user_id;  // Obtenir l'ID de l'utilisateur actuel
+          // Pas besoin de fetchUsers ici car fetchUsers est déjà appelé dans ngOnInit
         });
       },
       error => {
-        console.error('Error fetching history:', error);
+        console.error('Erreur lors de la récupération de l\'historique:', error);
       }
     );
   }
@@ -627,7 +665,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.delete(`http://127.0.0.1:8000/share/${uploadId}/user/${userId}`, { headers })
+    this.http.delete(`/api/share/${uploadId}/user/${userId}`, { headers })
         .pipe(
             catchError(error => {
                 console.error('Error removing share:', error);
@@ -645,7 +683,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
       });
   
-      this.http.get<any>('http://127.0.0.1:8000/current-user/', { headers }).subscribe(
+      this.http.get<any>('/api/current-user/', { headers }).subscribe(
         response => {
           this.currentUserId = response.id;
         },

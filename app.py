@@ -1,7 +1,10 @@
 # app.py
 import os
+import librosa
 import torch
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Form, status
+from fastapi import (
+    FastAPI, File, UploadFile, HTTPException, Depends, Form, status
+)
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
@@ -9,30 +12,29 @@ import soundfile as sf
 import numpy as np
 import math
 from fastapi.middleware.cors import CORSMiddleware
-import librosa
 from pydub import AudioSegment
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from database import SessionLocal, init_db
-from models import User, Upload
-from schemas import UserCreate, UserLogin, Token, UploadHistoryResponse
+from models import Share, User, Upload
+from schemas import (
+    ShareInfo, UploadHistory, UserCreate, UserLogin, Token,
+    UploadHistoryResponse, ShareCreate, ShareResponse
+)
 from auth import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    verify_password,
-    get_password_hash,
-    create_access_token,
-    decode_access_token,
+    ACCESS_TOKEN_EXPIRE_MINUTES, verify_password,
+    get_password_hash, create_access_token,
+    decode_access_token
 )
 from datetime import timedelta
 import uuid
 from werkzeug.utils import secure_filename  # For filename sanitization
 import logging
 import aiofiles
-import asyncio
 from collections import defaultdict
-from sqlalchemy import or_, text
-
+from sqlalchemy import or_
+from typing import List
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +46,8 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=1)  # Adjust the number of workers based on your server's capacity
+executor = ThreadPoolExecutor(max_workers=2)  # Adjust based on server capacity
+
 # Dictionnaire pour stocker les verrous par utilisateur
 user_locks = defaultdict(asyncio.Lock)
 
@@ -63,13 +66,12 @@ origins = [
     "https://medtranscribe.fr",
     "https://www.medtranscribe.fr",
     "http://localhost:4200",
-    # Your Angular app's address
     # Add other origins if necessary
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins,  # Can also use ["*"] to allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,9 +83,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 # Authentication dependency
 async def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
-):
+) -> User:
     token_data = decode_access_token(token)
     if token_data is None or token_data.username is None:
+        logger.warning("Token invalide ou manquant.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -91,6 +94,7 @@ async def get_current_user(
         )
     user = db.query(User).filter(User.username == token_data.username).first()
     if user is None:
+        logger.warning(f"Utilisateur non trouvé: {token_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
@@ -137,7 +141,7 @@ asr_pipeline = pipeline(
     batch_size=16,  # Adjust based on your device's capabilities
     torch_dtype=torch_dtype,
     device=pipeline_device,
-    generate_kwargs={"language": "french"},  # تنظیمات پیش‌فرض زبان
+    generate_kwargs={"language": "french"},  # Default language settings
 )
 
 # Directory to store audio files
@@ -208,14 +212,6 @@ async def upload_audio(
 
     # Obtenir le verrou associé à l'utilisateur
     user_lock = user_locks[user.id]
-
-    # Tenter d'acquérir le verrou sans attendre
-    if user_lock.locked():
-        logger.warning(f"User {user.username} already has a transcription in progress.")
-        raise HTTPException(
-            status_code=429,
-            detail="Vous avez déjà une transcription en cours. Veuillez réessayer plus tard.",
-        )
 
     # Acquérir le verrou
     async with user_lock:
@@ -322,8 +318,7 @@ async def upload_audio(
             }
         )
 
-
-def process_transcription(file_path):
+def process_transcription(file_path: str) -> str:
     """
     Process audio transcription in a separate thread.
     """
@@ -370,16 +365,18 @@ async def download_transcription(
     """Endpoint to download the transcription of a specific upload.
     Allows access for both owners and users with shared access."""
     
-    # Check if user is owner or has shared access
+    # Vérifier l'accès de l'utilisateur
     upload = db.query(Upload).filter(
-        (Upload.id == upload_id) & 
-        (
-            (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
+        Upload.id == upload_id
+    ).filter(
+        or_(
+            Upload.owner_id == current_user.id,
+            Upload.shares.any(Share.user_id == current_user.id)
         )
     ).first()
 
     if not upload:
+        logger.warning(f"Transcription non trouvée ou accès refusé pour upload_id: {upload_id}")
         raise HTTPException(
             status_code=404, 
             detail="Transcription not found or access denied"
@@ -387,6 +384,7 @@ async def download_transcription(
 
     transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
+        logger.error(f"Transcription file not found: {transcription_path}")
         raise HTTPException(status_code=404, detail="Transcription file not found")
 
     return FileResponse(
@@ -404,16 +402,18 @@ async def download_audio(
     """Endpoint to download the audio file.
     Allows access for both owners and users with shared access."""
     
-    # Check if user is owner or has shared access
+    # Vérifier l'accès de l'utilisateur
     upload = db.query(Upload).filter(
-        (Upload.id == upload_id) & 
-        (
-            (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
+        Upload.id == upload_id
+    ).filter(
+        or_(
+            Upload.owner_id == current_user.id,
+            Upload.shares.any(Share.user_id == current_user.id)
         )
     ).first()
 
     if not upload:
+        logger.warning(f"Audio file not found or access denied for upload_id: {upload_id}")
         raise HTTPException(
             status_code=404, 
             detail="Audio file not found or access denied"
@@ -421,6 +421,7 @@ async def download_audio(
 
     audio_path = os.path.join(AUDIO_DIR, upload.filename)
     if not os.path.exists(audio_path):
+        logger.error(f"Audio file not found: {audio_path}")
         raise HTTPException(status_code=404, detail="Audio file not found")
 
     return FileResponse(
@@ -436,21 +437,18 @@ async def get_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get user's upload history with optional filters"""
-    # Get user's own uploads
+    """Obtenir l'historique des uploads de l'utilisateur avec des filtres optionnels."""
     query = db.query(Upload)
     
     if include_shared:
-        # Get both owned and shared uploads
         query = query.filter(
             or_(
-                Upload.user_id == current_user.id,
-                Upload.shared_with.like(f'%{current_user.id}%')
+                Upload.owner_id == current_user.id,
+                Upload.shares.any(Share.user_id == current_user.id)
             )
         )
     else:
-        # Get only owned uploads
-        query = query.filter(Upload.user_id == current_user.id)
+        query = query.filter(Upload.owner_id == current_user.id)
 
     if not include_archived:
         query = query.filter(Upload.is_archived == False)
@@ -459,19 +457,23 @@ async def get_history(
     
     history = []
     for upload in uploads:
+        shared_with = [
+            ShareInfo(user_id=share.user_id, access_type=share.access_type)
+            for share in upload.shares
+        ]
         history.append({
             "upload_id": upload.id,
             "filename": upload.filename,
             "transcription_filename": upload.transcription_filename,
             "upload_time": upload.upload_time.isoformat(),
             "is_archived": upload.is_archived,
-            "shared_with": upload.get_shared_users(),
-            "owner_id": upload.user_id  # Add owner_id to each record
+            "shared_with": shared_with,
+            "owner_id": upload.owner_id
         })
     
     return {
         "history": history,
-        "current_user_id": current_user.id  # Include current user's ID
+        "current_user_id": current_user.id
     }
 
 @app.get("/get-transcription/{upload_id}")
@@ -480,30 +482,49 @@ async def get_transcription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Endpoint to retrieve the transcription text of a specific upload."""
+    """Endpoint pour récupérer le texte de transcription d'un enregistrement spécifique."""
     upload = db.query(Upload).filter(Upload.id == upload_id).first()
     
     if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
+        logger.warning(f"Upload not found: {upload_id}")
+        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
         
-    if not upload.has_access(current_user.id):
-        raise HTTPException(status_code=403, detail="Access denied")
-
+    # Vérifier si l'utilisateur a accès
+    has_access = False
+    is_editor = False
+    if upload.owner_id == current_user.id:
+        has_access = True
+        is_editor = True  # Propriétaire a accès en tant qu'éditeur
+    else:
+        share = db.query(Share).filter(
+            Share.upload_id == upload_id,
+            Share.user_id == current_user.id
+        ).first()
+        if share:
+            has_access = True
+            if share.access_type == 'editor':
+                is_editor = True
+    
+    if not has_access:
+        logger.warning(f"Access denied for user {current_user.username} to upload {upload_id}")
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    
     transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
-        raise HTTPException(status_code=404, detail="Transcription file not found")
-
+        logger.error(f"Transcription file not found: {transcription_path}")
+        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé")
+    
     try:
         async with aiofiles.open(transcription_path, "r", encoding="utf-8") as f:
             transcription = await f.read()
-        logger.info(f"Retrieved transcription for upload_id: {upload_id}")
+        logger.info(f"Transcription retrieved for upload_id: {upload_id}")
     except Exception as e:
         logger.error(f"Error reading transcription file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to read transcription file")
+        raise HTTPException(status_code=500, detail="Échec de la lecture du fichier de transcription")
+    
+    return {"transcription": transcription, "is_editor": is_editor}
 
-    return {"transcription": transcription}
-
-def diviser_audio(audio, samplerate=16000, duree_max=29):
+def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29) -> List[np.ndarray]:
     """
     Divides audio into segments with a maximum duration.
 
@@ -534,7 +555,7 @@ async def delete_upload(
     """Delete a specific upload and its associated files."""
     upload = (
         db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
+        .filter(Upload.id == upload_id, Upload.owner_id == current_user.id)
         .first()
     )
     if not upload:
@@ -556,6 +577,18 @@ async def delete_upload(
         logger.error(f"Error deleting files: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete associated files.")
 
+    # Supprimer les partages associés
+    try:
+        shares = db.query(Share).filter(Share.upload_id == upload_id).all()
+        for share in shares:
+            db.delete(share)
+        db.commit()
+        logger.info(f"Deleted {len(shares)} share(s) for upload_id: {upload_id}")
+    except Exception as e:
+        logger.error(f"Error deleting shares: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete associated shares.")
+
     # Delete database record
     try:
         db.delete(upload)
@@ -567,33 +600,67 @@ async def delete_upload(
 
     return {"message": "Upload deleted successfully"}
 
-@app.put("/history/{upload_id}")
+@app.put("/history/{upload_id}", response_model=UploadHistory)
 async def update_transcription(
     upload_id: int,
     transcription: str = Form(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update the transcription text for a specific upload."""
-    upload = (
-        db.query(Upload)
-        .filter(Upload.id == upload_id, Upload.user_id == current_user.id)
-        .first()
-    )
+    """Mettre à jour le texte de transcription pour un enregistrement spécifique."""
+    upload = db.query(Upload).filter(Upload.id == upload_id).first()
+    
     if not upload:
-        logger.warning(f"Upload not found: {upload_id} for user: {current_user.username}")
-        raise HTTPException(status_code=404, detail="Upload not found")
-
+        logger.warning(f"Upload not found: {upload_id}")
+        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+    
+    # Vérifier les permissions
+    is_editor = False
+    if upload.owner_id == current_user.id:
+        is_editor = True
+    else:
+        share = db.query(Share).filter(
+            Share.upload_id == upload_id,
+            Share.user_id == current_user.id,
+            Share.access_type == 'editor'
+        ).first()
+        if share:
+            is_editor = True
+    
+    if not is_editor:
+        logger.warning(f"User {current_user.username} lacks permission to edit upload {upload_id}")
+        raise HTTPException(status_code=403, detail="Vous n'avez pas la permission de modifier cette transcription")
+    
     transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
+    if not os.path.exists(transcription_path):
+        logger.error(f"Transcription file not found: {transcription_path}")
+        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé")
+    
     try:
         async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
             await f.write(transcription)
-        logger.info(f"Updated transcription for upload_id: {upload_id}")
+        logger.info(f"Transcription updated for upload_id: {upload_id}")
     except Exception as e:
         logger.error(f"Error updating transcription: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update transcription.")
-
-    return {"message": "Transcription updated successfully"}
+        raise HTTPException(status_code=500, detail="Échec de la mise à jour de la transcription")
+    
+    # Mettre à jour la base de données si nécessaire
+    upload.transcription_filename = upload.transcription_filename  # No change needed
+    db.commit()
+    db.refresh(upload)
+    
+    return {
+        "upload_id": upload.id,
+        "filename": upload.filename,
+        "transcription_filename": upload.transcription_filename,
+        "upload_time": upload.upload_time.isoformat(),
+        "is_archived": upload.is_archived,
+        "shared_with": [
+            ShareInfo(user_id=share.user_id, access_type=share.access_type)
+            for share in upload.shares
+        ],
+        "owner_id": upload.owner_id
+    }
 
 @app.get("/stream-audio/{upload_id}")
 async def stream_audio(
@@ -604,16 +671,18 @@ async def stream_audio(
     """Stream an audio file with proper headers for HTML5 audio player.
     Allows access for both owners and users with shared access."""
     
-    # Check if user is owner or has shared access
+    # Vérifier l'accès de l'utilisateur
     upload = db.query(Upload).filter(
-        (Upload.id == upload_id) & 
-        (
-            (Upload.user_id == current_user.id) |  # User is owner
-            (Upload.shared_with.like(f'%{current_user.id}%'))  # User has shared access
+        Upload.id == upload_id
+    ).filter(
+        or_(
+            Upload.owner_id == current_user.id,
+            Upload.shares.any(Share.user_id == current_user.id)
         )
     ).first()
 
     if not upload:
+        logger.warning(f"Audio file not found or access denied for upload_id: {upload_id}")
         raise HTTPException(
             status_code=404, 
             detail="Audio file not found or access denied"
@@ -621,6 +690,7 @@ async def stream_audio(
 
     audio_path = os.path.join(AUDIO_DIR, upload.filename)
     if not os.path.exists(audio_path):
+        logger.error(f"Audio file not found: {audio_path}")
         raise HTTPException(status_code=404, detail="Audio file not found")
 
     return FileResponse(
@@ -639,16 +709,18 @@ async def toggle_archive_status(
     db: Session = Depends(get_db)
 ):
     """Toggle the archive status of an upload."""
-    # Check if user is owner or has shared access
+    # Vérifier que l'utilisateur a accès
     upload = db.query(Upload).filter(
-        (Upload.id == upload_id) & 
-        (
-            (Upload.user_id == current_user.id) |
-            (Upload.shared_with.like(f'%{current_user.id}%'))  # Check shared access
+        Upload.id == upload_id
+    ).filter(
+        or_(
+            Upload.owner_id == current_user.id,
+            Upload.shares.any(Share.user_id == current_user.id)
         )
     ).first()
     
     if not upload:
+        logger.warning(f"Upload not found or access denied: {upload_id} by user {current_user.username}")
         raise HTTPException(
             status_code=404, 
             detail="Upload not found or you don't have permission to access it"
@@ -675,38 +747,64 @@ async def get_users(
         "users": [{"id": user.id, "username": user.username} for user in users]
     }
 
-@app.post("/share/{upload_id}/user/{user_id}")
+@app.post("/share/{upload_id}/user/", response_model=ShareResponse)
 async def share_with_user(
     upload_id: int,
-    user_id: int,
+    share: ShareCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Share an upload with another user"""
-    # Check if upload exists and belongs to current user
+    """
+    Partager un enregistrement avec un utilisateur spécifiant le type d'accès.
+    """
+    # Vérifier que l'enregistrement appartient à l'utilisateur actuel
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
-        Upload.user_id == current_user.id
+        Upload.owner_id == current_user.id
     ).first()
     
     if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
-    
-    # Check if target user exists
-    target_user = db.query(User).filter(User.id == user_id).first()
+        logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
+        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+
+    # Vérifier que l'utilisateur cible existe
+    target_user = db.query(User).filter(User.id == share.user_id).first()
     if not target_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        logger.warning(f"Target user not found: {share.user_id}")
+        raise HTTPException(status_code=404, detail="Utilisateur cible non trouvé")
+    
+    # Vérifier le type d'accès
+    if share.access_type not in ['viewer', 'editor']:
+        logger.warning(f"Invalid access type: {share.access_type}")
+        raise HTTPException(status_code=400, detail="Type d'accès invalide")
+    
+    # Vérifier si le partage existe déjà
+    existing_share = db.query(Share).filter(
+        Share.upload_id == upload_id,
+        Share.user_id == share.user_id
+    ).first()
+    
+    if existing_share:
+        existing_share.access_type = share.access_type  # Mettre à jour le type d'accès
+        logger.info(f"Updated existing share for user {share.user_id} on upload {upload_id}")
+    else:
+        new_share = Share(
+            upload_id=upload_id,
+            user_id=share.user_id,
+            access_type=share.access_type
+        )
+        db.add(new_share)
+        logger.info(f"Created new share for user {share.user_id} on upload {upload_id}")
     
     try:
-        # Add user to shared_with list
-        upload.add_shared_user(user_id)
         db.commit()
-        logger.info(f"Upload {upload_id} shared with user {user_id}")
-        return {"message": "Upload shared successfully"}
+        db.refresh(existing_share or new_share)
     except Exception as e:
         db.rollback()
         logger.error(f"Error sharing upload: {e}")
         raise HTTPException(status_code=500, detail="Failed to share upload")
+    
+    return existing_share or new_share
 
 @app.delete("/share/{upload_id}/user/{user_id}")
 async def remove_share(
@@ -715,28 +813,41 @@ async def remove_share(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Remove share access for a user"""
+    """
+    Supprimer le partage d'un enregistrement avec un utilisateur.
+    """
+    # Vérifier que l'enregistrement appartient à l'utilisateur actuel
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
-        Upload.user_id == current_user.id
+        Upload.owner_id == current_user.id
     ).first()
     
     if not upload:
-        raise HTTPException(status_code=404, detail="Upload not found")
+        logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
+        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
     
-    # Remove user from shared_with list
-    upload.remove_shared_user(user_id)
+    # Trouver le partage
+    share = db.query(Share).filter(
+        Share.upload_id == upload_id,
+        Share.user_id == user_id
+    ).first()
     
+    if not share:
+        logger.warning(f"Share not found for user {user_id} on upload {upload_id}")
+        raise HTTPException(status_code=404, detail="Partage non trouvé")
+    
+    db.delete(share)
     try:
         db.commit()
-        logger.info(f"Share access removed for user {user_id} from upload {upload_id}")
+        logger.info(f"Removed share for user {user_id} on upload {upload_id}")
     except Exception as e:
-        logger.error(f"Error removing share access: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to remove share access")
+        logger.error(f"Error removing share: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove share")
     
-    return {"message": "Share access removed successfully"}
+    return {"message": "Accès de partage supprimé avec succès"}
 
+# Punctuation mapping and replacement function
 PUNCTUATION_MAP = {
     "point": ".",
     "virgule": ",",
@@ -775,13 +886,12 @@ PUNCTUATION_MAP = {
     "Entre parenthèses": "(",
     "Fermez la parenthèse": ")",
     "fermez la parenthèse": ")",
-
 }
 
-def remplacer_ponctuation(transcription):
+def remplacer_ponctuation(transcription: str) -> str:
     """
     Remplace les mots de ponctuation par les signes de ponctuation correspondants.
-    
+
     :param transcription: Texte de la transcription.
     :return: Texte avec ponctuation remplacée.
     """

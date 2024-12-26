@@ -1,3 +1,5 @@
+<!-- src/app/transcriber/transcriber.component.html -->
+
 <div class="min-h-screen bg-base-200">
   <!-- Mobile hamburger button -->
   <button
@@ -41,15 +43,21 @@
         >
       </div>
 
-      <!-- Users list -->
+      <!-- Users list with access type selection -->
       <div class="max-h-96 overflow-y-auto">
         <div *ngFor="let user of users | userFilter:searchQuery" class="flex items-center justify-between p-2 hover:bg-base-200 rounded">
           <span>{{ user.username }}</span>
-          <button 
-            class="btn btn-ghost btn-sm"
-            (click)="shareWithUser(user.id)">
-            Partager
-          </button>
+          <div class="flex items-center gap-2">
+            <select [(ngModel)]="user.accessType" class="select select-bordered select-sm">
+              <option value="viewer">Lecteur</option>
+              <option value="editor">Éditeur</option>
+            </select>
+            <button 
+              class="btn btn-ghost btn-sm"
+              (click)="shareWithUser(user.id, user.accessType)">
+              Partager
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -70,46 +78,46 @@
         <ul class="space-y-4">
           <li *ngFor="let record of history.slice().reverse()">
             <!-- Record item -->
-<div class="flex flex-col space-y-2 p-4 rounded-lg" 
-[ngClass]="{'bg-base-200': !record.is_archived, 'bg-base-300': record.is_archived}">
-
-<!-- Record item with three-dot menu -->
-<div class="flex justify-between items-start">
-<button 
-  class="flex-1 text-left hover:bg-base-300 transition-colors duration-200 p-2 rounded"
-  (click)="selectUpload(record.upload_id)">
-  <div class="text-sm break-all">
-    <span class="font-bold">{{ getPatientName(record.upload_id) }}</span>
-    <span *ngIf="record.is_archived" class="ml-2 text-xs bg-gray-500 text-white px-2 py-1 rounded">
-      Archivé
-    </span>
-  </div>
-  <!-- Add owner information for shared records -->
-  <div *ngIf="record.owner_id !== getCurrentUserId() " class="text-xs text-gray-600">
-    <span class="font-bold">Propriétaire : </span>
-    <span>{{ getUserName(record.owner_id) }}</span>
-  </div>
-  <div class="text-sm text-gray-500">
-    <span class="font-bold">Heure : </span>{{ record.upload_time | date:'short' }}
-  </div>
-  <!-- Shared users list -->
-  <div *ngIf="getSharedWith(record).length > 0" class="mt-1 text-xs text-gray-600">
-    <span class="font-bold">Partagé avec : </span>
-    <div class="flex flex-wrap gap-1 mt-1">
-      <span 
-        *ngFor="let userId of getSharedWith(record)" 
-        class="bg-base-300 px-2 py-1 rounded-full flex items-center gap-1">
-        {{ getUserName(userId) }}
-        <button 
-          *ngIf="record.owner_id === getCurrentUserId()"
-          class="hover:text-error"
-          (click)="removeShare(record.upload_id, userId); $event.stopPropagation()">
-          ×
-        </button>
-      </span>
-    </div> 
-  </div>
-</button>
+            <div class="flex flex-col space-y-2 p-4 rounded-lg" 
+              [ngClass]="{'bg-base-200': !record.is_archived, 'bg-base-300': record.is_archived}">
+              
+              <!-- Record item with three-dot menu -->
+              <div class="flex justify-between items-start">
+                <button 
+                  class="flex-1 text-left hover:bg-base-300 transition-colors duration-200 p-2 rounded"
+                  (click)="selectUpload(record.upload_id)">
+                  <div class="text-sm break-all">
+                    <span class="font-bold">{{ getPatientName(record.upload_id) }}</span>
+                    <span *ngIf="record.is_archived" class="ml-2 text-xs bg-gray-500 text-white px-2 py-1 rounded">
+                      Archivé
+                    </span>
+                  </div>
+                  <!-- Add owner information for shared records -->
+                  <div *ngIf="record.owner_id !== getCurrentUserId()" class="text-xs text-gray-600">
+                    <span class="font-bold">Propriétaire : </span>
+                    <span>{{ getUserName(record.owner_id) }}</span>
+                  </div>
+                  <div class="text-sm text-gray-500">
+                    <span class="font-bold">Heure : </span>{{ record.upload_time | date:'short' }}
+                  </div>
+                  <!-- Shared users list -->
+                  <div *ngIf="record.shared_with.length > 0" class="mt-1 text-xs text-gray-600">
+                    <span class="font-bold">Partagé avec : </span>
+                    <div class="flex flex-wrap gap-1 mt-1">
+                      <span 
+                        *ngFor="let userId of getSharedWith(record)" 
+                        class="bg-base-300 px-2 py-1 rounded-full flex items-center gap-1">
+                        {{ getUserName(userId) }}
+                        <button 
+                          *ngIf="record.owner_id === getCurrentUserId()"
+                          class="hover:text-error"
+                          (click)="removeShare(record.upload_id, userId); $event.stopPropagation()">
+                          ×
+                        </button>
+                      </span>
+                    </div> 
+                  </div>
+                </button>
 
                 <!-- Three-dot menu -->
                 <div class="relative">
@@ -200,7 +208,6 @@
 
     <!-- Main content -->
     <main class="flex-1 p-4 md:p-8 space-y-8 w-full">
-
       <app-pricing></app-pricing>
       <!-- Section combinée pour upload et enregistrement -->
       <div class="card bg-base-100 shadow-md p-6">
@@ -308,10 +315,10 @@
               </div>
             </div>
 
-            <!-- Edit button -->
+            <!-- Edit button (visible uniquement pour les éditeurs) -->
             <button 
               class="btn btn-ghost btn-sm p-2"
-              *ngIf="selectedUploadId && !isEditing"
+              *ngIf="selectedUploadId && isEditor && !isEditing"
               (click)="startEditing()"
               title="Modifier">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

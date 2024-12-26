@@ -1,8 +1,6 @@
 # models.py
-import json
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, JSON
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
+from sqlalchemy.orm import relationship, declarative_base
 import datetime
 
 Base = declarative_base()
@@ -13,45 +11,57 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    uploads = relationship("Upload", back_populates="owner")
+    
+    # Relation avec Upload
+    uploads = relationship("Upload", back_populates="owner", cascade="all, delete-orphan")
+    
+    # Relation avec Share
+    shares = relationship("Share", back_populates="user", cascade="all, delete-orphan")
 
-# In models.py
+
 class Upload(Base):
     __tablename__ = 'uploads'
     
     id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, unique=False, index=True, nullable=False)
-    transcription_filename = Column(String, unique=False, index=True, nullable=False)
+    filename = Column(String, nullable=False)
+    transcription_filename = Column(String, nullable=True)
     upload_time = Column(DateTime, default=datetime.datetime.utcnow)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    owner_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     is_archived = Column(Boolean, default=False)
-    shared_with = Column(String, default='[]')  # Store as JSON string
     
+    # Relation avec User
     owner = relationship("User", back_populates="uploads")
-
-    def get_shared_users(self) -> list[int]:
-        """Get list of user IDs this upload is shared with"""
-        try:
-            if not self.shared_with:
-                return []
-            return json.loads(self.shared_with)
-        except json.JSONDecodeError:
-            return []
-
-    def add_shared_user(self, user_id: int):
-        """Add a user ID to shared_with list"""
-        current_users = self.get_shared_users()
-        if user_id not in current_users:
-            current_users.append(user_id)
-            self.shared_with = json.dumps(current_users)
-
-    def remove_shared_user(self, user_id: int):
-        """Remove a user ID from shared_with list"""
-        current_users = self.get_shared_users()
-        if user_id in current_users:
-            current_users.remove(user_id)
-            self.shared_with = json.dumps(current_users)
-
+    
+    # Relation avec Share
+    shares = relationship("Share", back_populates="upload", cascade="all, delete-orphan")
+    
     def has_access(self, user_id: int) -> bool:
-        """Check if a user has access to this upload"""
-        return user_id == self.user_id or user_id in self.get_shared_users()
+        """Vérifie si un utilisateur a accès à cet upload"""
+        return user_id == self.owner_id or any(share.user_id == user_id for share in self.shares)
+    
+    def get_shared_users(self) -> list[int]:
+        """Retourne la liste des IDs des utilisateurs avec qui cet upload est partagé"""
+        return [share.user_id for share in self.shares]
+    
+    def add_shared_user(self, user_id: int, access_type: str = 'viewer'):
+        """Ajoute un partage avec un utilisateur"""
+        if not any(share.user_id == user_id for share in self.shares):
+            new_share = Share(user_id=user_id, access_type=access_type)
+            self.shares.append(new_share)
+    
+    def remove_shared_user(self, user_id: int):
+        """Supprime un partage avec un utilisateur"""
+        self.shares = [share for share in self.shares if share.user_id != user_id]
+
+
+class Share(Base):
+    __tablename__ = 'shares'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    upload_id = Column(Integer, ForeignKey('uploads.id'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    access_type = Column(String, nullable=False)  # 'viewer' ou 'editor'
+    
+    # Relations
+    upload = relationship("Upload", back_populates="shares")
+    user = relationship("User", back_populates="shares")
