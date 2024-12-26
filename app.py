@@ -352,6 +352,10 @@ def process_transcription(file_path):
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
 
+        # Remplacer les mots de ponctuation par les signes correspondants
+        transcription_complete = remplacer_ponctuation(transcription_complete)
+        logger.info("Ponctuation remplacée dans la transcription complète.")
+
         return transcription_complete
     except Exception as e:
         logger.error(f"Failed to process transcription for {file_path}: {e}")
@@ -732,3 +736,55 @@ async def remove_share(
         raise HTTPException(status_code=500, detail="Failed to remove share access")
     
     return {"message": "Share access removed successfully"}
+
+PUNCTUATION_MAP = {
+    "point": ".",
+    "virgule": ",",
+    "nouvelle ligne": "\n",
+    "À la ligne": "\n",
+    "a la ligne": "\n",
+    "sur la ligne": "\n",
+    "point d'exclamation": "!",
+    "point d'interrogation": "?",
+    "deux points": ":",
+    "point-virgule": ";",
+    "trait d'union": "-",
+    "parenthèse ouvrante": "(",
+    "parenthèse fermante": ")",
+    "guillemets ouvrants": "«",
+    "guillemets fermants": "»",
+    "apostrophe": "'",
+    "barre oblique": "/",
+    "barre oblique inversée": "\\",
+    "astérisque": "*",
+    "tilde": "~",
+    "dièse": "#",
+    "dollar": "$",
+    "pourcentage": "%",
+    "arobase": "@",
+    "plus": "+",
+    "moins": "-",
+    "égal": "=",
+    "inférieur": "<",
+    "supérieur": ">",
+    "crochet ouvrant": "[",
+    "crochet fermant": "]",
+    "accolade ouvrante": "{",
+    "accolade fermante": "}",
+    "entre parenthèses": "(",
+    "Entre parenthèses": "(",
+    "Fermez la parenthèse": ")",
+    "fermez la parenthèse": ")",
+
+}
+
+def remplacer_ponctuation(transcription):
+    """
+    Remplace les mots de ponctuation par les signes de ponctuation correspondants.
+    
+    :param transcription: Texte de la transcription.
+    :return: Texte avec ponctuation remplacée.
+    """
+    for mot, signe in PUNCTUATION_MAP.items():
+        transcription = transcription.replace(mot, signe)
+    return transcription
