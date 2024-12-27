@@ -19,7 +19,11 @@ interface AutoShareConfig {
   accessType: AccessType;
   username?: string;
 }
-
+interface ShareInfo {
+  user_id: number;
+  access_type: string;
+  username?: string; // Add username if available from backend
+}
 
 interface ShareCreate {
   user_id: number;
@@ -116,8 +120,8 @@ export class TranscriberComponent implements OnInit {
   
 
   
-  getSharedWith(record: UploadHistory): number[] {
-    return (record.shared_with || []).map(share => share.user_id);
+  getSharedWith(record: UploadHistory): ShareInfo[] {
+    return record.shared_with || [];
   }
   
   ngOnInit(): void {
@@ -784,6 +788,24 @@ downloadAudioFile(upload_id: number): void {
       const foundUser = this.users.find(u => u.id === userId);
       if (foundUser) {
         this.autoShareConfig.username = foundUser.username;
+      }
+    }
+
+    getUserAccessType(record: UploadHistory): string | null {
+      if (!this.currentUserId) return null;
+      
+      const shareInfo = record.shared_with.find(share => share.user_id === this.currentUserId);
+      return shareInfo ? this.formatAccessType(shareInfo.access_type) : null;
+    }
+  
+    formatAccessType(accessType: string): string {
+      switch(accessType.toLowerCase()) {
+        case 'editor':
+          return 'Éditeur';
+        case 'viewer':
+          return 'Lecteur';
+        default:
+          return accessType;
       }
     }
   }
