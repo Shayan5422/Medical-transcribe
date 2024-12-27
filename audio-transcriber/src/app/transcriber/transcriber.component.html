@@ -208,7 +208,79 @@
 
     <!-- Main content -->
     <main class="flex-1 p-4 md:p-8 space-y-8 w-full">
+      
+
+        <!-- Add this button in the main toolbar or wherever appropriate -->
+        <div class="mb-4">
+          <button 
+            class="btn btn-outline btn-sm"
+            (click)="openAutoShareModal()">
+            <div class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                <polyline points="16 6 12 2 8 6"></polyline>
+                <line x1="12" y1="2" x2="12" y2="15"></line>
+              </svg>
+              {{ autoShareConfig.userId ? 'Modifier Auto-partage' : 'Configurer Auto-partage' }}
+            </div>
+          </button>
+        
+          <!-- Display active auto-share configuration -->
+          <div *ngIf="autoShareConfig.userId" class="mt-2 text-sm text-base-content/70">
+            Auto-partage actif avec: {{ autoShareConfig.username }} ({{ autoShareConfig.accessType }})
+          </div>
+        </div>
+        
+        <!-- Auto-share Modal -->
+        <div *ngIf="showAutoShareModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div class="bg-base-100 p-6 rounded-lg shadow-xl w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-lg font-semibold">Configuration Auto-partage</h3>
+              <button class="btn btn-ghost btn-sm p-2" (click)="closeAutoShareModal()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+        
+            <p class="mb-4 text-sm">
+              Sélectionnez un utilisateur pour partager automatiquement tous les nouveaux enregistrements avec lui.
+              {{ autoShareConfig.userId ? 'Cliquez sur le même utilisateur pour désactiver l\'auto-partage.' : '' }}
+            </p>
+        
+            <!-- Users list -->
+            <div class="max-h-96 overflow-y-auto space-y-2">
+              <div *ngFor="let user of users" 
+  class="flex items-center justify-between p-2 hover:bg-base-200 rounded">
+  <span>{{ user.username }}</span>
+  <div class="flex items-center gap-2">
+    <select 
+      class="select select-bordered select-sm"
+      [value]="user.id === autoShareConfig.userId ? autoShareConfig.accessType : 'viewer'"
+      (change)="onAccessTypeChange($event)">
+      <option value="viewer">Lecteur</option>
+      <option value="editor">Éditeur</option>
+    </select>
+    <button 
+      class="btn btn-ghost btn-sm"
+      [class.btn-active]="user.id === autoShareConfig.userId"
+      (click)="toggleAutoShare(user.id)">
+      {{ user.id === autoShareConfig.userId ? 'Désactiver' : 'Activer' }}
+    </button>
+  </div>
+</div>
+
+<!-- Add an indicator for active auto-share -->
+<div *ngIf="autoShareConfig.userId" class="text-sm text-base-content/70 mt-2">
+  Auto-partage actif avec: {{ autoShareConfig.username }} ({{ autoShareConfig.accessType }})
+</div>
+
+            </div>
+          </div>
+        </div>
       <app-pricing></app-pricing>
+      
       <!-- Section combinée pour upload et enregistrement -->
       <div class="card bg-base-100 shadow-md p-6">
         <h3 class="text-2xl font-semibold text-base-content mb-4">

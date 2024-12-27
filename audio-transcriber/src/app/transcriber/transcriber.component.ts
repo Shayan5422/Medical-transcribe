@@ -12,6 +12,13 @@ import { catchError, EMPTY } from 'rxjs';
 import { User } from './user.model';
 
 
+type AccessType = 'viewer' | 'editor';
+
+interface AutoShareConfig {
+  userId: number | null;
+  accessType: AccessType;
+  username?: string;
+}
 
 
 interface ShareCreate {
@@ -82,7 +89,24 @@ export class TranscriberComponent implements OnInit {
 
 
 
-  
+  autoShareConfig: AutoShareConfig = {
+    userId: null,
+    accessType: 'viewer',
+    username: ''
+  };
+  showAutoShareModal = false;
+  currentAccessType: AccessType = 'viewer';
+
+  onAccessTypeChange(event: Event): void {
+    const select = event.target as HTMLSelectElement;
+    this.currentAccessType = select.value as AccessType;
+  }
+
+  validateAccessType(type: string): AccessType {
+    return type === 'editor' ? 'editor' : 'viewer';
+  }
+
+
   constructor(
     private http: HttpClient,
     private router: Router,
@@ -112,12 +136,21 @@ export class TranscriberComponent implements OnInit {
         this.isSidebarOpen = false;
       }
     });
-
+    const savedConfig = localStorage.getItem('autoShareConfig');
+    if (savedConfig) {
+      this.autoShareConfig = JSON.parse(savedConfig);
+      // If there's a saved config, fetch the username
+      if (this.autoShareConfig.userId) {
+        this.fetchUserName(this.autoShareConfig.userId);
+      }
+    }
+  
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
       this.currentTheme = savedTheme;
     }
     document.documentElement.setAttribute('data-theme', this.currentTheme);
+    
   }
 
   toggleSidebar(): void {
@@ -143,36 +176,36 @@ export class TranscriberComponent implements OnInit {
     );
   }
 
-  shareWithUser(userId: number, accessType: 'viewer' | 'editor'): void {
+  shareWithUser(userId: number, accessType: AccessType): void {
     if (!this.selectedUploadForShare) {
-        console.error('Aucun enregistrement sélectionné pour le partage');
-        return;
+      console.error('Aucun enregistrement sélectionné pour le partage');
+      return;
     }
 
     const headers = new HttpHeaders({
-        'Authorization': `Bearer ${this.token}`
+      'Authorization': `Bearer ${this.token}`
     });
 
     const payload: ShareCreate = {
-        user_id: userId,
-        access_type: accessType
+      user_id: userId,
+      access_type: accessType
     };
 
     this.http.post<ShareResponse>(
-        `/api/share/${this.selectedUploadForShare}/user/`, 
-        payload, 
-        { headers }
+      `/api/share/${this.selectedUploadForShare}/user/`,
+      payload,
+      { headers }
     ).pipe(
-        catchError(error => {
-            console.error('Erreur lors du partage:', error);
-            alert('Erreur lors du partage');
-            return EMPTY;
-        })
+      catchError(error => {
+        console.error('Erreur lors du partage:', error);
+        alert('Erreur lors du partage');
+        return EMPTY;
+      })
     ).subscribe(() => {
-        this.fetchHistory();
-        this.fetchUsers();  // Rafraîchir la liste des utilisateurs après partage
-        alert('Transcription partagée avec succès');
-        this.closeShareModal();
+      this.fetchHistory();
+      this.fetchUsers();
+      
+      this.closeShareModal();
     });
   }
 
@@ -259,55 +292,58 @@ export class TranscriberComponent implements OnInit {
   }
 
 
-  uploadAudio(file: File): void {
-    const formData = new FormData();
-    formData.append('file', file);
-  
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
-  
-    console.log('Téléchargement du fichier :', file);
-    console.log('Type de fichier :', file.type);
-  
-    this.ngZone.run(() => {
-      this.isTranscribing = true;
-      this.transcription = null;
-      this.selectedTranscription = null;
-      this.selectedUploadId = null;
-      this.audioStreamUrl = null;
-      this.isEditor = false; // Reset isEditor state
-    });
-  
-    this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
-      response => {
-        console.log('Réponse de transcription :', response);
-        this.ngZone.run(() => {
-          this.transcription = response.transcription;
-          this.transcriptionFile = response.transcription_file;
-          this.isTranscribing = false;
-          this.selectedUploadId = response.upload_id;
-          this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`;
-          this.isEditor = true; // Set isEditor to true as the user is the owner
-        });
+  // Inside TranscriberComponent class
+uploadAudio(file: File): void {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers = new HttpHeaders({
+    'Authorization': `Bearer ${this.token}`
+  });
+
+  this.ngZone.run(() => {
+    this.isTranscribing = true;
+    this.transcription = null;
+    this.selectedTranscription = null;
+    this.selectedUploadId = null;
+    this.audioStreamUrl = null;
+  });
+
+  this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
+    response => {
+      console.log('Réponse de transcription :', response);
+      this.ngZone.run(() => {
+        this.transcription = response.transcription;
+        this.transcriptionFile = response.transcription_file;
+        this.isTranscribing = false;
+        this.selectedUploadId = response.upload_id;
+        this.selectedUploadForShare = response.upload_id;  // Set this before auto-sharing
+        this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`;
         
-        console.log('Transcription définie :', this.transcription);
-        this.fetchHistory();
-      },
-      (error: HttpErrorResponse) => {
-        console.error('Erreur lors du téléchargement du fichier audio :', error);
-        this.ngZone.run(() => {
-          if (error.error && error.error.detail) {
-            alert(`Erreur : ${error.error.detail}`);
-          } else {
-            alert('Erreur lors du téléchargement du fichier audio.');
-          }
-          this.isTranscribing = false;
-          this.isEditor = false; // Reset isEditor on error
-        });
-      }
-    );
-  }
+        // Auto-share if configured
+        if (this.autoShareConfig.userId) {
+          this.shareWithUser(
+            this.autoShareConfig.userId,
+            this.autoShareConfig.accessType
+          );
+        }
+      });
+      
+      this.fetchHistory();
+    },
+    error => {
+      console.error('Erreur lors du téléchargement:', error);
+      this.ngZone.run(() => {
+        if (error.error && error.error.detail) {
+          alert(`Erreur : ${error.error.detail}`);
+        } else {
+          alert('Erreur lors du téléchargement.');
+        }
+        this.isTranscribing = false;
+      });
+    }
+  );
+}
   // Démarrer l'enregistrement audio
   startRecording(): void {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -613,9 +649,9 @@ downloadAudioFile(upload_id: number): void {
       .subscribe(
         (response: any) => {
           this.fetchHistory();
-          // اختیاری: نمایش پیام موفقیت‌آمیز
+         
           const status = response.is_archived ? 'archivé' : 'désarchivé';
-          alert(`L'enregistrement a été ${status} avec succès`);
+          
         }
       );
   }
@@ -710,6 +746,45 @@ downloadAudioFile(upload_id: number): void {
     // Method to determine if the current user should see the remove button
     canRemoveShare(record: UploadHistory): boolean {
       return record.owner_id === this.currentUserId;
+    }
+
+
+    openAutoShareModal(): void {
+      this.showAutoShareModal = true;
+      this.fetchUsers();
+    }
+  
+    closeAutoShareModal(): void {
+      this.showAutoShareModal = false;
+    }
+  
+    toggleAutoShare(userId: number): void {
+    if (this.autoShareConfig.userId === userId) {
+      // Disable auto-share
+      this.autoShareConfig = {
+        userId: null,
+        accessType: 'viewer',
+        username: ''
+      };
+    } else {
+      // Enable auto-share
+      const user = this.users.find(u => u.id === userId);
+      this.autoShareConfig = {
+        userId,
+        accessType: this.currentAccessType,
+        username: user?.username
+      };
+    }
+    
+    localStorage.setItem('autoShareConfig', JSON.stringify(this.autoShareConfig));
+    this.closeAutoShareModal();
+  }
+  
+    private fetchUserName(userId: number): void {
+      const foundUser = this.users.find(u => u.id === userId);
+      if (foundUser) {
+        this.autoShareConfig.username = foundUser.username;
+      }
     }
   }
   
