@@ -259,55 +259,55 @@ export class TranscriberComponent implements OnInit {
   }
 
 
-// Dans la méthode uploadAudio
-uploadAudio(file: File): void {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const headers = new HttpHeaders({
-    'Authorization': `Bearer ${this.token}`
-  });
-
-  console.log('Téléchargement du fichier :', file);
-  console.log('Type de fichier :', file.type);
-
-  this.ngZone.run(() => {
-    this.isTranscribing = true;
-    this.transcription = null;
-    this.selectedTranscription = null;
-    this.selectedUploadId = null;
-    this.audioStreamUrl = null; // Reset audio URL
-  });
-
-  this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
-    response => {
-      console.log('Réponse de transcription :', response);
-      this.ngZone.run(() => {
-        this.transcription = response.transcription;
-        this.transcriptionFile = response.transcription_file;
-        this.isTranscribing = false;
+  uploadAudio(file: File): void {
+    const formData = new FormData();
+    formData.append('file', file);
+  
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+  
+    console.log('Téléchargement du fichier :', file);
+    console.log('Type de fichier :', file.type);
+  
+    this.ngZone.run(() => {
+      this.isTranscribing = true;
+      this.transcription = null;
+      this.selectedTranscription = null;
+      this.selectedUploadId = null;
+      this.audioStreamUrl = null;
+      this.isEditor = false; // Reset isEditor state
+    });
+  
+    this.http.post<any>('/api/upload-audio/', formData, { headers }).subscribe(
+      response => {
+        console.log('Réponse de transcription :', response);
+        this.ngZone.run(() => {
+          this.transcription = response.transcription;
+          this.transcriptionFile = response.transcription_file;
+          this.isTranscribing = false;
+          this.selectedUploadId = response.upload_id;
+          this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`;
+          this.isEditor = true; // Set isEditor to true as the user is the owner
+        });
         
-        this.selectedUploadId = response.upload_id; 
-        this.audioStreamUrl = `/api/stream-audio/${response.upload_id}`; 
-      });
-      
-      console.log('Transcription définie :', this.transcription);
-      this.fetchHistory();
-    },
-    (error: HttpErrorResponse) => {
-      console.error('Erreur lors du téléchargement du fichier audio :', error);
-      this.ngZone.run(() => {
-        if (error.error && error.error.detail) {
-          alert(`Erreur : ${error.error.detail}`);
-        } else {
-          alert('Erreur lors du téléchargement du fichier audio.');
-        }
-        this.isTranscribing = false;
-      });
-    }
-  );
-}
-
+        console.log('Transcription définie :', this.transcription);
+        this.fetchHistory();
+      },
+      (error: HttpErrorResponse) => {
+        console.error('Erreur lors du téléchargement du fichier audio :', error);
+        this.ngZone.run(() => {
+          if (error.error && error.error.detail) {
+            alert(`Erreur : ${error.error.detail}`);
+          } else {
+            alert('Erreur lors du téléchargement du fichier audio.');
+          }
+          this.isTranscribing = false;
+          this.isEditor = false; // Reset isEditor on error
+        });
+      }
+    );
+  }
   // Démarrer l'enregistrement audio
   startRecording(): void {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -423,7 +423,7 @@ uploadAudio(file: File): void {
 
   startEditing(): void {
     this.isEditing = true;
-    this.editedTranscription = this.selectedTranscription || '';
+    this.editedTranscription = this.transcription || this.selectedTranscription || '';
   }
 
   
@@ -439,10 +439,14 @@ uploadAudio(file: File): void {
 
     this.http.put(`/api/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
+        // Update both transcription sources
+        if (this.transcription) {
+          this.transcription = this.editedTranscription;
+        }
         this.selectedTranscription = this.editedTranscription;
         this.isEditing = false;
-        this.isEditor = false; // Désactiver le mode éditeur après enregistrement
-        this.fetchHistory(); // Rafraîchir l'historique pour refléter les changements
+        this.isEditor = false;
+        this.fetchHistory();
       },
       error => {
         console.error('Erreur lors de la mise à jour:', error);
@@ -450,6 +454,7 @@ uploadAudio(file: File): void {
       }
     );
   }
+
 
 
   copyTranscription(): void {
@@ -476,13 +481,14 @@ uploadAudio(file: File): void {
     this.isEditing = false;
     this.editedTranscription = '';
   }
+
   closeTranscription(): void {
     this.transcription = null;
     this.selectedTranscription = null;
     this.selectedUploadId = null;
     this.isEditing = false;
     this.editedTranscription = '';
-    this.audioStreamUrl = null; // Reset audio URL
+    this.audioStreamUrl = null;
   }
   
 
