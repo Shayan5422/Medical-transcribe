@@ -66,7 +66,7 @@
   <div class="flex relative">
     <!-- Sidebar -->
     <aside [ngClass]="{
-      'fixed md:relative w-72 bg-base-100 border-r border-base-300 h-screen transition-transform duration-300 ease-in-out z-40': true,
+      'fixed md:relative w-80 bg-base-100 border-r border-base-300 h-screen transition-transform duration-300 ease-in-out z-40': true,
       'translate-x-0': isSidebarOpen,
       '-translate-x-full': !isSidebarOpen,
       'md:translate-x-0': true
@@ -116,17 +116,17 @@
                     <span class="font-bold">Partagé avec : </span>
                     <div class="flex flex-wrap gap-1 mt-1">
                       <span 
-        *ngFor="let share of getSharedWith(record)" 
-        class="bg-base-300 px-2 py-1 rounded-full flex items-center gap-1">
-        {{ getUserName(share.user_id) }}
-        <span class="text-xs opacity-75">({{ formatAccessType(share.access_type) }})</span>
-        <button 
-          *ngIf="record.owner_id === getCurrentUserId()"
-          class="hover:text-error ml-1"
-          (click)="removeShare(record.upload_id, share.user_id); $event.stopPropagation()">
-          ×
-        </button>
-      </span>
+                        *ngFor="let share of getSharedWith(record)" 
+                        class="bg-base-300 px-2 py-1 rounded-full flex items-center gap-1">
+                        {{ getUserName(share.user_id) }}
+                        <span class="text-xs opacity-75">({{ formatAccessType(share.access_type) }})</span>
+                        <button 
+                          *ngIf="record.owner_id === getCurrentUserId()"
+                          class="hover:text-error ml-1"
+                          (click)="removeShare(record.upload_id, share.user_id); $event.stopPropagation()">
+                          ×
+                        </button>
+                      </span>
                     </div> 
                   </div>
                 </button>
@@ -264,29 +264,29 @@
             <!-- Users list -->
             <div class="max-h-96 overflow-y-auto space-y-2">
               <div *ngFor="let user of users" 
-  class="flex items-center justify-between p-2 hover:bg-base-200 rounded">
-  <span>{{ user.username }}</span>
-  <div class="flex items-center gap-2">
-    <select 
-      class="select select-bordered select-sm"
-      [value]="user.id === autoShareConfig.userId ? autoShareConfig.accessType : 'viewer'"
-      (change)="onAccessTypeChange($event)">
-      <option value="viewer">Lecteur</option>
-      <option value="editor">Éditeur</option>
-    </select>
-    <button 
-      class="btn btn-ghost btn-sm"
-      [class.btn-active]="user.id === autoShareConfig.userId"
-      (click)="toggleAutoShare(user.id)">
-      {{ user.id === autoShareConfig.userId ? 'Désactiver' : 'Activer' }}
-    </button>
-  </div>
-</div>
+                class="flex items-center justify-between p-2 hover:bg-base-200 rounded">
+                <span>{{ user.username }}</span>
+                <div class="flex items-center gap-2">
+                  <select 
+                    class="select select-bordered select-sm"
+                    [value]="user.id === autoShareConfig.userId ? autoShareConfig.accessType : 'viewer'"
+                    (change)="onAccessTypeChange($event)">
+                    <option value="viewer">Lecteur</option>
+                    <option value="editor">Éditeur</option>
+                  </select>
+                  <button 
+                    class="btn btn-ghost btn-sm"
+                    [class.btn-active]="user.id === autoShareConfig.userId"
+                    (click)="toggleAutoShare(user.id)">
+                    {{ user.id === autoShareConfig.userId ? 'Désactiver' : 'Activer' }}
+                  </button>
+                </div>
+              </div>
 
-<!-- Add an indicator for active auto-share -->
-<div *ngIf="autoShareConfig.userId" class="text-sm text-base-content/70 mt-2">
-  Auto-partage actif avec: {{ autoShareConfig.username }} ({{ autoShareConfig.accessType }})
-</div>
+              <!-- Add an indicator for active auto-share -->
+              <div *ngIf="autoShareConfig.userId" class="text-sm text-base-content/70 mt-2">
+                Auto-partage actif avec: {{ autoShareConfig.username }} ({{ autoShareConfig.accessType }})
+              </div>
 
             </div>
           </div>
