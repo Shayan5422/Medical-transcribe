@@ -2,8 +2,15 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship, declarative_base
 import datetime
+import pytz
 
 Base = declarative_base()
+
+def get_current_paris_time():
+    """
+    Returns current time in France timezone
+    """
+    return datetime.datetime.now(pytz.timezone('Europe/Paris'))
 
 class User(Base):
     __tablename__ = 'users'
@@ -25,7 +32,7 @@ class Upload(Base):
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String, nullable=False)
     transcription_filename = Column(String, nullable=True)
-    upload_time = Column(DateTime, default=datetime.datetime.utcnow)
+    upload_time = Column(DateTime(timezone=True), default=get_current_paris_time)
     owner_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     is_archived = Column(Boolean, default=False)
     

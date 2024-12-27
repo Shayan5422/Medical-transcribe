@@ -4,11 +4,15 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from typing import Optional
 from schemas import TokenData
+import pytz
 
 # SECRET_KEY should be kept secret in production. Consider using environment variables.
 SECRET_KEY = "your-secure-secret-key"  # Replace with a strong secret key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Define France timezone
+FRANCE_TZ = pytz.timezone('Europe/Paris')
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -31,9 +35,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(FRANCE_TZ) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)  # Default expiry
+        expire = datetime.now(FRANCE_TZ) + timedelta(minutes=15)  # Default expiry
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
