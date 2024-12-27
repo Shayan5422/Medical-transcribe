@@ -89,9 +89,17 @@ export class TranscriberComponent implements OnInit {
   showSharedRecords: boolean = false;
   currentUserId: number | null = null;
   isEditor: boolean = false; // Variable pour gérer le rôle d'éditeur
-  
+  showModelMenu = false;
+  selectedModel: string = 'fast'; // Default to fast model
+  models = [
+    { id: 'fast', name: 'Rapide', value: 'openai/whisper-large-v3-turbo' },
+    { id: 'accurate', name: 'Précis', value: 'openai/whisper-large-v3' }
+  ];
 
-
+  // Add this helper method
+  getSelectedModelValue(): string {
+    return this.models.find(m => m.id === this.selectedModel)?.value || 'openai/whisper-large-v3-turbo';
+  }
 
   autoShareConfig: AutoShareConfig = {
     userId: null,
@@ -297,23 +305,24 @@ export class TranscriberComponent implements OnInit {
 
 
   // Inside TranscriberComponent class
-uploadAudio(file: File): void {
-  const formData = new FormData();
-  formData.append('file', file);
+  uploadAudio(file: File): void {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('model', this.getSelectedModelValue()); // Add model to form data
 
-  const headers = new HttpHeaders({
-    'Authorization': `Bearer ${this.token}`
-  });
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
 
-  this.ngZone.run(() => {
-    this.isTranscribing = true;
-    this.transcription = null;
-    this.selectedTranscription = null;
-    this.selectedUploadId = null;
-    this.audioStreamUrl = null;
-  });
+    this.ngZone.run(() => {
+      this.isTranscribing = true;
+      this.transcription = null;
+      this.selectedTranscription = null;
+      this.selectedUploadId = null;
+      this.audioStreamUrl = null;
+    });
 
-  this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
+    this.http.post<any>('http://127.0.0.1:8000/upload-audio/', formData, { headers }).subscribe(
     response => {
       console.log('Réponse de transcription :', response);
       this.ngZone.run(() => {
@@ -348,6 +357,8 @@ uploadAudio(file: File): void {
     }
   );
 }
+
+
   // Démarrer l'enregistrement audio
   startRecording(): void {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {

@@ -291,10 +291,75 @@
             </div>
           </div>
         </div>
+
       <app-pricing></app-pricing>
       
       <!-- Section combinée pour upload et enregistrement -->
       <div class="card bg-base-100 shadow-md p-6">
+        <!-- Add this near the top of your main content, just below the mobile hamburger button -->
+<div class="absolute top-4 right-4 z-50">
+  <div class="dropdown dropdown-end">
+    <label tabindex="0" class="btn btn-ghost btn-sm">
+      <div class="flex items-center gap-2">
+        <span>Modèle: {{ selectedModel === 'fast' ? 'Rapide' : 'Précis' }}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </div>
+    </label>
+    <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52">
+      <li>
+        <button 
+          class="flex items-center gap-2 p-2"
+          [class.active]="selectedModel === 'fast'"
+          (click)="selectedModel = 'fast'">
+          <svg xmlns="http://www.w3.org/2000/svg" 
+               width="16" 
+               height="16" 
+               viewBox="0 0 24 24" 
+               fill="none" 
+               stroke="currentColor" 
+               stroke-width="2" 
+               stroke-linecap="round" 
+               stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <div class="flex flex-col">
+            <span class="font-medium">Rapide</span>
+            <span class="text-xs opacity-70">Idéal pour les enregistrements courts</span>
+          </div>
+        </button>
+      </li>
+      <li>
+        <button 
+          class="flex items-center gap-2 p-2"
+          [class.active]="selectedModel === 'accurate'"
+          (click)="selectedModel = 'accurate'">
+          <svg xmlns="http://www.w3.org/2000/svg" 
+               width="16" 
+               height="16" 
+               viewBox="0 0 24 24" 
+               fill="none" 
+               stroke="currentColor" 
+               stroke-width="2" 
+               stroke-linecap="round" 
+               stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+          <div class="flex flex-col">
+            <span class="font-medium">Précis</span>
+            <span class="text-xs opacity-70">Pour les enregistrements complexes</span>
+          </div>
+        </button>
+      </li>
+    </ul>
+  </div>
+</div>
+
+<!-- Remove the old model selection card -->
+
+<!-- Rest of your existing template code remains the same -->
         <h3 class="text-2xl font-semibold text-base-content mb-4">
           Importer ou Enregistrer un Fichier Audio
         </h3>

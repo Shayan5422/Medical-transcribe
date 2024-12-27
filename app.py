@@ -119,30 +119,10 @@ else:
     torch_dtype = torch.float32
     logger.info("Using CPU for both PyTorch and Transformers pipeline.")
 
-# Model identifier for Whisper large-v3-turbo
-model_id = "openai/whisper-large-v3-turbo"
 
-# Load model and processor
-logger.info("Loading model and processor...")
-model = AutoModelForSpeechSeq2Seq.from_pretrained(
-    model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
-)
-model.to(torch_device)
-processor = AutoProcessor.from_pretrained(model_id)
-logger.info("Model and processor loaded.")
 
-# Create ASR pipeline with optimized settings
-asr_pipeline = pipeline(
-    "automatic-speech-recognition",
-    model=model,
-    tokenizer=processor.tokenizer,
-    feature_extractor=processor.feature_extractor,
-    chunk_length_s=30,  # Optimal chunk length for large-v3-turbo
-    batch_size=16,  # Adjust based on your device's capabilities
-    torch_dtype=torch_dtype,
-    device=pipeline_device,
-    generate_kwargs={"language": "french"},  # Default language settings
-)
+
+
 
 # Directory to store audio files
 AUDIO_DIR = "audio_files"
@@ -202,49 +182,42 @@ async def login(
 async def upload_audio(
     user: User = Depends(get_current_user),
     file: UploadFile = File(...),
+    model: str = Form("openai/whisper-large-v3-turbo"),  # Default model
     db: Session = Depends(get_db),
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
     Ensure that each user can only have one transcription request at a time.
     """
-    logger.info(f"User {user.username} is uploading file: {file.filename}")
+    logger.info(f"User {user.username} is uploading file: {file.filename} using model: {model}")
 
-    # Obtenir le verrou associé à l'utilisateur
+    # Get user-specific lock
     user_lock = user_locks[user.id]
 
-    # Acquérir le verrou
+    # Acquire the lock
     async with user_lock:
         logger.info(f"Acquired lock for user {user.username}")
 
-        # Générer un nom de fichier unique en utilisant UUID pour éviter les conditions de course
+        # Generate unique filename using UUID
         unique_id = uuid.uuid4().hex
         file_extension = os.path.splitext(file.filename)[1].lower()
         new_filename = f"{unique_id}{file_extension}"
 
-        # Extraire le type de contenu principal
+        # Extract main content type
         content_type_main = file.content_type.split(";")[0].strip()
 
-        # Types audio supportés
+        # Supported audio types
         supported_types = [
-            "audio/wav",
-            "audio/mpeg",
-            "audio/mp3",
-            "audio/x-wav",
-            "audio/webm",
-            "audio/ogg",
-            "audio/flac",
-            "audio/m4a",
-            "audio/x-m4a",
-            "audio/mp4",
-            "audio/aac",
+            "audio/wav", "audio/mpeg", "audio/mp3", "audio/x-wav",
+            "audio/webm", "audio/ogg", "audio/flac", "audio/m4a",
+            "audio/x-m4a", "audio/mp4", "audio/aac"
         ]
 
         if content_type_main not in supported_types:
             logger.warning(f"Unsupported file type: {content_type_main}")
             raise HTTPException(status_code=400, detail="Format de fichier audio non supporté.")
 
-        # Sauvegarder le fichier audio téléchargé de manière asynchrone
+        # Save uploaded audio file asynchronously
         file_path = os.path.join(AUDIO_DIR, new_filename)
         try:
             async with aiofiles.open(file_path, "wb") as out_file:
@@ -255,7 +228,7 @@ async def upload_audio(
             logger.error(f"Error saving uploaded file: {e}")
             raise HTTPException(status_code=500, detail="Échec de la sauvegarde du fichier téléchargé.")
 
-        # Convertir en WAV si nécessaire
+        # Convert to WAV if necessary
         if content_type_main != "audio/wav":
             try:
                 audio = AudioSegment.from_file(file_path)
@@ -271,20 +244,44 @@ async def upload_audio(
                 logger.error(f"Error converting audio: {e}")
                 raise HTTPException(status_code=400, detail=f"Erreur lors de la conversion de l'audio: {e}")
 
-        # Traiter la transcription dans un thread séparé
+        # Load model and processor based on selected model
+        try:
+            model_instance = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
+            )
+            model_instance.to(torch_device)
+            processor = AutoProcessor.from_pretrained(model)
+
+            # Create ASR pipeline with optimized settings
+            asr_pipeline = pipeline(
+                "automatic-speech-recognition",
+                model=model_instance,
+                tokenizer=processor.tokenizer,
+                feature_extractor=processor.feature_extractor,
+                chunk_length_s=30,
+                batch_size=16,
+                torch_dtype=torch_dtype,
+                device=pipeline_device,
+                generate_kwargs={"language": "french"},
+            )
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            raise HTTPException(status_code=500, detail=f"Erreur lors du chargement du modèle: {e}")
+
+        # Process transcription in a separate thread
         try:
             transcription = await asyncio.get_event_loop().run_in_executor(
-                executor, process_transcription, file_path
+                executor, process_transcription, file_path, asr_pipeline
             )
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
             raise HTTPException(status_code=500, detail=f"Erreur lors de la transcription: {e}")
 
-        # Générer le nom de fichier de transcription
+        # Generate transcription filename
         transcription_filename = f"{unique_id}_transcription.txt"
         transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
 
-        # Sauvegarder la transcription de manière asynchrone
+        # Save transcription asynchronously
         try:
             async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
                 await f.write(transcription.strip())
@@ -293,7 +290,7 @@ async def upload_audio(
             logger.error(f"Error saving transcription: {e}")
             raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription.")
 
-        # Sauvegarder l'enregistrement de l'upload
+        # Save upload record
         upload_record = Upload(
             filename=new_filename,
             transcription_filename=transcription_filename,
@@ -307,7 +304,8 @@ async def upload_audio(
         except Exception as e:
             logger.error(f"Database commit failed: {e}")
             raise HTTPException(
-                status_code=500, detail="Échec de la sauvegarde de l'enregistrement de l'upload dans la base de données."
+                status_code=500, 
+                detail="Échec de la sauvegarde de l'enregistrement de l'upload dans la base de données."
             )
 
         return JSONResponse(
@@ -318,9 +316,16 @@ async def upload_audio(
             }
         )
 
-def process_transcription(file_path: str) -> str:
+def process_transcription(file_path: str, asr_pipeline) -> str:
     """
     Process audio transcription in a separate thread.
+    
+    Args:
+        file_path: Path to the audio file
+        asr_pipeline: The initialized ASR pipeline to use for transcription
+    
+    Returns:
+        str: The transcribed text
     """
     logger.info(f"Processing transcription for {file_path}")
     try:
@@ -347,9 +352,9 @@ def process_transcription(file_path: str) -> str:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
 
-        # Remplacer les mots de ponctuation par les signes correspondants
+        # Replace punctuation words with corresponding signs
         transcription_complete = remplacer_ponctuation(transcription_complete)
-        logger.info("Ponctuation remplacée dans la transcription complète.")
+        logger.info("Punctuation replaced in complete transcription.")
 
         return transcription_complete
     except Exception as e:
