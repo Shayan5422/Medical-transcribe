@@ -62,6 +62,7 @@ def get_db():
 # CORS configuration
 origins = [
     "https://shaz.ai",
+    "https://backend.shaz.ai",
     "http://51.15.224.218:4200",
     "http://medtranscribe.fr",
     "https://medtranscribe.fr",
