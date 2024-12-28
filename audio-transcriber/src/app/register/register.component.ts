@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms'; // Importer FormsModule pour ngModel
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router'; // Pour la navigation
+import { environment } from '../../environments/environment';
 
 @Component({
   selector: 'app-register',
@@ -45,7 +46,7 @@ export class RegisterComponent implements OnInit {
       referralCode: this.referralCode // Envoi du code de parrainage au serveur (optionnel)
     };
 
-    this.http.post<any>('${environment.apiUrl}/register/', registerData).subscribe(
+    this.http.post<any>(`${environment.apiUrl}/register/`, registerData).subscribe(
       (response) => {
         this.successMessage = 'Inscription réussie. Vous pouvez maintenant vous connecter.';
         this.errorMessage = '';

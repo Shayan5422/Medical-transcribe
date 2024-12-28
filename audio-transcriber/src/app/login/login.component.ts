@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms'; // Import FormsModule for ngModel
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Router } from '@angular/router'; // For navigation
+import { environment } from '../../environments/environment';
 
 @Component({
   selector: 'app-login',
@@ -32,7 +33,8 @@ export class LoginComponent implements OnInit {
       'Content-Type': 'application/x-www-form-urlencoded'
     });
   
-    this.http.post<any>('${environment.apiUrl}/token/', body.toString(), { headers }).subscribe(
+    // Corrected line with backticks
+    this.http.post<any>(`${environment.apiUrl}/token/`, body.toString(), { headers }).subscribe(
       (response) => {
         // Assuming response contains the token
         localStorage.setItem('token', response.access_token);
@@ -42,7 +44,6 @@ export class LoginComponent implements OnInit {
           // Refresh the page after navigation
           window.location.reload();
         });
-        
       },
       (error) => {
         if (error.status === 422) {
@@ -54,5 +55,4 @@ export class LoginComponent implements OnInit {
       }
     );
   }
-  
 }

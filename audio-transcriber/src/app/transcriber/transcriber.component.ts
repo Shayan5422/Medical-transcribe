@@ -175,7 +175,7 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<{users: User[]}>('${environment.apiUrl}/users/', { headers }).subscribe(
+    this.http.get<{users: User[]}>(`${environment.apiUrl}/users/`, { headers }).subscribe(
       response => {
         // Initialiser accessType pour chaque utilisateur
         this.users = response.users.map(user => ({
@@ -323,7 +323,7 @@ export class TranscriberComponent implements OnInit {
       this.audioStreamUrl = null;
     });
 
-    this.http.post<any>('${environment.apiUrl}/upload-audio/', formData, { headers }).subscribe(
+    this.http.post<any>(`${environment.apiUrl}/upload-audio/`, formData, { headers }).subscribe(
     response => {
       console.log('Réponse de transcription :', response);
       this.ngZone.run(() => {
@@ -677,7 +677,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    let url = '${environment.apiUrl}/history/';
+    let url = `${environment.apiUrl}/history/`;
     if (this.showArchived) {
       url += '?include_archived=true';
     }
@@ -741,7 +741,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
       });
   
-      this.http.get<any>('${environment.apiUrl}/current-user/', { headers }).subscribe(
+      this.http.get<any>(`${environment.apiUrl}/current-user/`, { headers }).subscribe(
         response => {
           this.currentUserId = response.id;
         },
