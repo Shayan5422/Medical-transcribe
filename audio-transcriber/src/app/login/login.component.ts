@@ -34,7 +34,7 @@ export class LoginComponent implements OnInit {
     });
   
     // Corrected line with backticks
-    this.http.post<any>(`${environment.apiUrl}/token/`, body.toString(), { headers }).subscribe(
+    this.http.post<any>(`https://backend.shaz.ai/token/`, body.toString(), { headers }).subscribe(
       (response) => {
         // Assuming response contains the token
         localStorage.setItem('token', response.access_token);
