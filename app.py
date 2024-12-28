@@ -61,20 +61,23 @@ def get_db():
 
 # CORS configuration
 origins = [
+    "https://shaz.ai",
     "http://51.15.224.218:4200",
     "http://medtranscribe.fr",
     "https://medtranscribe.fr",
     "https://www.medtranscribe.fr",
     "http://localhost:4200",
+    
     # Add other origins if necessary
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Can also use ["*"] to allow all origins
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # OAuth2 scheme for token extraction

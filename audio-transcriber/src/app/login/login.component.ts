@@ -32,7 +32,7 @@ export class LoginComponent implements OnInit {
       'Content-Type': 'application/x-www-form-urlencoded'
     });
   
-    this.http.post<any>('https://backend.shaz.ai/token/', body.toString(), { headers }).subscribe(
+    this.http.post<any>('https://shaz.ai/token/', body.toString(), { headers }).subscribe(
       (response) => {
         // Assuming response contains the token
         localStorage.setItem('token', response.access_token);
