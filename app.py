@@ -613,17 +613,18 @@ async def delete_upload(
 async def update_transcription(
     upload_id: int,
     transcription: str = Form(...),
+    filename: str = Form(None),  # New optional parameter
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Mettre à jour le texte de transcription pour un enregistrement spécifique."""
+    """Update transcription and optionally filename for a specific record."""
     upload = db.query(Upload).filter(Upload.id == upload_id).first()
     
     if not upload:
         logger.warning(f"Upload not found: {upload_id}")
         raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
     
-    # Vérifier les permissions
+    # Check permissions
     is_editor = False
     if upload.owner_id == current_user.id:
         is_editor = True
@@ -638,30 +639,50 @@ async def update_transcription(
     
     if not is_editor:
         logger.warning(f"User {current_user.username} lacks permission to edit upload {upload_id}")
-        raise HTTPException(status_code=403, detail="Vous n'avez pas la permission de modifier cette transcription")
+        raise HTTPException(
+            status_code=403, 
+            detail="Vous n'avez pas la permission de modifier cette transcription"
+        )
     
+    # Update transcription file
     transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
         logger.error(f"Transcription file not found: {transcription_path}")
-        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé")
+        raise HTTPException(
+            status_code=404, 
+            detail="Fichier de transcription non trouvé"
+        )
     
     try:
         async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
             await f.write(transcription)
         logger.info(f"Transcription updated for upload_id: {upload_id}")
-    except Exception as e:
-        logger.error(f"Error updating transcription: {e}")
-        raise HTTPException(status_code=500, detail="Échec de la mise à jour de la transcription")
+        
+        # Update filename if provided
+        if filename:
+            # Sanitize the filename
+            safe_filename = secure_filename(filename)
+            if safe_filename:
+                # Update the custom_filename in database
+                upload.custom_filename = safe_filename
+                db.commit()
+                logger.info(f"Filename updated for upload_id: {upload_id}")
     
-    # Mettre à jour la base de données si nécessaire
-    upload.transcription_filename = upload.transcription_filename  # No change needed
-    db.commit()
+    except Exception as e:
+        logger.error(f"Error updating transcription or filename: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Échec de la mise à jour de la transcription ou du nom de fichier"
+        )
+    
+    # Update database if needed
     db.refresh(upload)
     
     return {
         "upload_id": upload.id,
         "filename": upload.filename,
         "transcription_filename": upload.transcription_filename,
+        "custom_filename": upload.custom_filename,  # Add this to your response model
         "upload_time": upload.upload_time.isoformat(),
         "is_archived": upload.is_archived,
         "shared_with": [
