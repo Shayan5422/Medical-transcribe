@@ -293,7 +293,9 @@
         </div>
 
       <app-pricing></app-pricing>
-      
+      <div class="md:col-span-2 text-center text-base-content/20 italic">
+        La clarté de votre voix optimise la précision de la transcription
+      </div>
       <!-- Section combinée pour upload et enregistrement -->
       <div class="card bg-base-100 shadow-md p-6">
         <!-- Add this near the top of your main content, just below the mobile hamburger button -->
@@ -415,7 +417,7 @@
             class="btn btn-success px-6 py-2 h-12"
             (click)="uploadSelectedFile()"
             [disabled]="!selectedFile || isTranscribing">
-            Télécharger et Transcrire
+            Auto transcript
           </button>
         </div>
       </div>
@@ -574,9 +576,7 @@
           </button>
         </div>
       </div>
-      <div class="md:col-span-2 text-center text-base-content/20 italic">
-        La clarté de votre voix optimise la précision de la transcription
-      </div>
+      
     </main>
   </div>
 </div>
