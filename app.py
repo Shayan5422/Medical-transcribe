@@ -1,4 +1,5 @@
 # app.py
+import re
 import os
 import librosa
 import torch
@@ -323,11 +324,11 @@ async def upload_audio(
 def process_transcription(file_path: str, asr_pipeline) -> str:
     """
     Process audio transcription with improved segment handling.
-    
+
     Args:
         file_path: Path to the audio file
         asr_pipeline: The initialized ASR pipeline
-        
+
     Returns:
         str: The transcribed text with proper word boundaries
     """
@@ -360,7 +361,7 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
                     
                     # Look for overlap between segments
                     overlap_found = False
-                    for i in range(min(len(prev_words), len(words))):
+                    for i in range(1, min(len(prev_words), len(words)) + 1):
                         if prev_words[-i:] == words[:i]:
                             transcription = " ".join(words[i:])
                             overlap_found = True
@@ -378,10 +379,15 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
 
-        # Replace punctuation words with corresponding signs
+        
+        
         transcription_complete = remplacer_ponctuation(transcription_complete.strip())
-        logger.info("Transcription completed with proper word boundaries")
-
+        transcription_complete = clean_text_preserve_newlines(transcription_complete)
+        
+        
+        
+        
+        logger.info("Transcription completed with proper word boundaries and cleaned text")
         return transcription_complete
         
     except Exception as e:
@@ -922,6 +928,14 @@ async def remove_share(
 # Punctuation mapping and replacement function
 PUNCTUATION_MAP = {
     "point": ".",
+    "point .": ".",
+    "point.": ".",
+    "point,": ".",
+    "point ,": ".",
+    ". point ": ".",
+    ".point ": ".",
+    ",point ": ".",
+    ", point ": ".",
     "virgule": ",",
     "nouvelle ligne": "\n",
     "À la ligne": "\n",
@@ -930,6 +944,13 @@ PUNCTUATION_MAP = {
     "point d'exclamation": "!",
     "point d'interrogation": "?",
     "deux points": ":",
+    "2 points": ":",
+    "2 point": ":",
+    "2point": ":",
+    "2points": ":",
+    "2.": ":",
+    "2 .": ":",
+    "deux point": ":",
     "point-virgule": ";",
     "trait d'union": "-",
     "parenthèse ouvrante": "(",
@@ -959,11 +980,18 @@ PUNCTUATION_MAP = {
     "Fermez la parenthèse": ")",
     "fermez la parenthèse": ")",
     "nouvelle ligne": "\n",
-    "à la ligne": "\n",
     "ouvrez la parenthèse" : "(",
     "fermez la parenthèse" : ")",
     "tiret du 6": "-",
     "à la ligne:":"\n ",
+    "a la ligne:":"\n ",
+    "à la ligne":"\n ",
+    "à la ligne: .":"\n ",
+    "à la ligne:.":"\n ",
+    ". à la ligne:.":"\n ",
+    ".à la ligne:.":"\n ",
+    ".a la ligne:":"\n ",
+    ". a la ligne:":"\n ",
     "points de suspension": "...",
     "double point": "..",
     "retour chariot": "\r\n",
@@ -994,7 +1022,15 @@ PUNCTUATION_MAP = {
     "pour mille": "‰",
     "exposant un": "¹",
     "exposant deux": "²",
-    "exposant trois": "³"
+    "exposant trois": "³",
+    "\n .":"\n ",
+    "\n.":"\n ",
+    ". \n":"\n ",
+    ".\n":"\n ",
+    ". \n .":"\n ",
+    ".\n .":"\n ",
+    ".\n.":"\n ",
+    
 
 
 
@@ -1003,7 +1039,7 @@ PUNCTUATION_MAP = {
 def remplacer_ponctuation(transcription: str) -> str:
     """
     Replace punctuation words with corresponding punctuation marks in a case-insensitive manner.
-    
+
     Args:
         transcription: Input text containing punctuation words
     Returns:
@@ -1030,4 +1066,42 @@ def remplacer_ponctuation(transcription: str) -> str:
     
     return result
 
+def clean_text_preserve_newlines(text: str) -> str:
+    
+    # # # جایگزینی چند نقطه با یک نقطه
+    # text = re.sub(r'\.{2,}', '.', text)
 
+    # # # جایگزینی چند کاما با یک کاما
+    # text = re.sub(r',{2,}', ',', text)
+
+    # # # جایگزینی الگوهای خاص مثل '. ..' و '. ,.' با یک نقطه
+    text = re.sub(r'\.\s*\.\.', '.', text)
+    text = re.sub(r'\.\.\s*\.', '.', text)
+    text = re.sub(r'\.\,\s*\.', '.', text)
+    text = re.sub(r'\.\s*,\s*\.', '.', text)
+    text = re.sub(r'\.\s*,\s*,\s*\.', '.', text)
+    
+    # # # می‌توانید الگوهای بیشتری را در صورت نیاز اضافه کنید
+
+    # # # جایگزینی کاما دنبال شده توسط نقطه با نقطه
+    # text = re.sub(r',\.+', '.', text)
+
+    # # # جایگزینی نقطه دنبال شده توسط کاما با نقطه
+    # text = re.sub(r'\.,+', '.', text)
+
+    # # # حذف فاصله‌های اضافی قبل از علائم نگارشی
+    # # text = re.sub(r'\s+([.,!?;:])', r'\1', text)
+
+    # # # جایگزینی چند فاصله با یک فاصله
+    # text = re.sub(r'\s{2,}', ' ', text)
+
+    # # # حفظ خط‌های جدیدی که بعد از علائم پایان جمله آمده‌اند
+    # # text = re.sub(r'([.!?])\s*\n\s*', r'\1\n', text)
+
+    # # # حذف خط‌های جدیدی که بعد از علائم پایان جمله نیستند
+    # # text = re.sub(r'(?<![.!?])\n', ' ', text)
+
+    # # # حذف فاصله‌های ابتدایی و انتهایی
+    # # text = text.strip()
+
+    return text
