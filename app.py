@@ -62,7 +62,7 @@ def get_db():
 # CORS configuration
 origins = [
     "https://shaz.ai",
-    "https://backend.shaz.ai",
+    "http://localhost:8000",
     "http://51.15.224.218:4200",
     "http://medtranscribe.fr",
     "https://medtranscribe.fr",
@@ -322,16 +322,15 @@ async def upload_audio(
 
 def process_transcription(file_path: str, asr_pipeline) -> str:
     """
-    Process audio transcription in a separate thread.
+    Process audio transcription with improved segment handling.
     
     Args:
         file_path: Path to the audio file
-        asr_pipeline: The initialized ASR pipeline to use for transcription
-    
+        asr_pipeline: The initialized ASR pipeline
+        
     Returns:
-        str: The transcribed text
+        str: The transcribed text with proper word boundaries
     """
-    logger.info(f"Processing transcription for {file_path}")
     try:
         audio_data, samplerate = sf.read(file_path)
         logger.info(f"Audio data loaded: {len(audio_data)} samples at {samplerate} Hz")
@@ -341,29 +340,54 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
             samplerate = 16000
             logger.info(f"Audio resampled to {samplerate} Hz")
 
-        segments = diviser_audio(audio_data, samplerate, duree_max=29)
-        logger.info(f"Audio divided into {len(segments)} segment(s).")
+        # Use overlapping segments
+        segments = diviser_audio(audio_data, samplerate, duree_max=29, overlap_seconds=2.0)
+        logger.info(f"Audio divided into {len(segments)} overlapping segments")
 
         transcription_complete = ""
+        previous_segment_end = ""
 
         for idx, segment in enumerate(segments):
             try:
                 logger.info(f"Processing segment {idx + 1}/{len(segments)}")
-                transcription = asr_pipeline(segment)["text"]
-                transcription_complete += transcription + " "
-                logger.info(f"Segment {idx + 1} transcription: {transcription}")
+                transcription = asr_pipeline(segment)["text"].strip()
+                
+                # Handle overlap between segments
+                if idx > 0:
+                    # Find the overlapping part and merge properly
+                    words = transcription.split()
+                    prev_words = previous_segment_end.split()
+                    
+                    # Look for overlap between segments
+                    overlap_found = False
+                    for i in range(min(len(prev_words), len(words))):
+                        if prev_words[-i:] == words[:i]:
+                            transcription = " ".join(words[i:])
+                            overlap_found = True
+                            break
+                            
+                    if not overlap_found:
+                        # If no clear overlap found, use a space to separate
+                        transcription = " " + transcription
+                
+                transcription_complete += transcription
+                previous_segment_end = transcription[-100:]  # Keep last portion for overlap check
+                logger.info(f"Segment {idx + 1} processed successfully")
+                
             except Exception as e:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
 
         # Replace punctuation words with corresponding signs
-        transcription_complete = remplacer_ponctuation(transcription_complete)
-        logger.info("Punctuation replaced in complete transcription.")
+        transcription_complete = remplacer_ponctuation(transcription_complete.strip())
+        logger.info("Transcription completed with proper word boundaries")
 
         return transcription_complete
+        
     except Exception as e:
         logger.error(f"Failed to process transcription for {file_path}: {e}")
         raise e
+
 
 @app.get("/download-transcription/{upload_id}")
 async def download_transcription(
@@ -533,27 +557,45 @@ async def get_transcription(
     
     return {"transcription": transcription, "is_editor": is_editor}
 
-def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29) -> List[np.ndarray]:
+def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29, overlap_seconds: float = 2.0) -> List[np.ndarray]:
     """
-    Divides audio into segments with a maximum duration.
-
-    :param audio: Numpy array containing audio data
-    :param samplerate: Sampling rate in Hz
-    :param duree_max: Maximum duration of each segment in seconds
-    :return: List of audio segments
+    Divides audio into segments with overlap to avoid word truncation.
+    
+    Args:
+        audio: Numpy array containing audio data
+        samplerate: Sampling rate in Hz
+        duree_max: Maximum duration of each segment in seconds
+        overlap_seconds: Overlap duration between segments in seconds
+        
+    Returns:
+        List of audio segments with overlap
     """
     frames_max = int(duree_max * samplerate)
+    overlap_frames = int(overlap_seconds * samplerate)
     total_frames = len(audio)
     segments = []
-    nombre_segments = math.ceil(total_frames / frames_max)
-
+    
+    # Calculate number of segments needed with overlap
+    effective_segment_length = frames_max - overlap_frames
+    nombre_segments = math.ceil((total_frames - overlap_frames) / effective_segment_length)
+    
     for i in range(nombre_segments):
-        start = i * frames_max
-        end = start + frames_max
+        # Calculate start and end positions with overlap
+        start = i * (frames_max - overlap_frames)
+        end = min(start + frames_max, total_frames)
+        
+        # Create segment with overlap
         segment = audio[start:end]
+        
+        # Add extra silence padding if needed for last segment
+        if len(segment) < frames_max:
+            padding_length = frames_max - len(segment)
+            segment = np.pad(segment, (0, padding_length), mode='constant')
+            
         segments.append(segment)
-
+    
     return segments
+
 
 @app.delete("/history/{upload_id}")
 async def delete_upload(
@@ -960,11 +1002,32 @@ PUNCTUATION_MAP = {
 
 def remplacer_ponctuation(transcription: str) -> str:
     """
-    Remplace les mots de ponctuation par les signes de ponctuation correspondants.
-
-    :param transcription: Texte de la transcription.
-    :return: Texte avec ponctuation remplacée.
+    Replace punctuation words with corresponding punctuation marks in a case-insensitive manner.
+    
+    Args:
+        transcription: Input text containing punctuation words
+    Returns:
+        str: Text with punctuation words replaced by actual punctuation marks
     """
+    # Convert input to lowercase for case-insensitive comparison
+    result = transcription
+    
+    # Create case-insensitive pattern replacements
     for mot, signe in PUNCTUATION_MAP.items():
-        transcription = transcription.replace(mot, signe)
-    return transcription
+        # Create patterns for different cases:
+        # 1. All lowercase
+        # 2. First letter capitalized
+        # 3. All uppercase
+        patterns = [
+            mot.lower(),
+            mot.capitalize(),
+            mot.upper()
+        ]
+        
+        # Apply each pattern
+        for pattern in patterns:
+            result = result.replace(pattern, signe)
+    
+    return result
+
+
