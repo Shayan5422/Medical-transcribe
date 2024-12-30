@@ -192,9 +192,9 @@ async def upload_audio(
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
-    Ensure that each user can only have one transcription request at a time.
+    Automatically switches to whisper-large-v3 for files longer than 2 minutes.
     """
-    logger.info(f"User {user.username} is uploading file: {file.filename} using model: {model}")
+    logger.info(f"User {user.username} is uploading file: {file.filename}")
 
     # Get user-specific lock
     user_lock = user_locks[user.id]
@@ -248,6 +248,20 @@ async def upload_audio(
             except Exception as e:
                 logger.error(f"Error converting audio: {e}")
                 raise HTTPException(status_code=400, detail=f"Erreur lors de la conversion de l'audio: {e}")
+
+        # Check audio duration and select appropriate model
+        try:
+            audio_data, samplerate = sf.read(file_path)
+            duration_seconds = len(audio_data) / samplerate
+            
+            if duration_seconds > 120:  # If longer than 2 minutes
+                model = "openai/whisper-large-v3"
+                logger.info(f"Audio duration: {duration_seconds}s. Switching to full model.")
+            else:
+                logger.info(f"Audio duration: {duration_seconds}s. Using turbo model.")
+        except Exception as e:
+            logger.error(f"Error checking audio duration: {e}")
+            raise HTTPException(status_code=500, detail="Erreur lors de la vérification de la durée audio.")
 
         # Load model and processor based on selected model
         try:
@@ -318,6 +332,7 @@ async def upload_audio(
                 "transcription": transcription.strip(),
                 "transcription_file": transcription_filename,
                 "upload_id": upload_record.id,
+                "model_used": model  # Added to response to show which model was used
             }
         )
 
@@ -382,7 +397,7 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
         
         
         transcription_complete = remplacer_ponctuation(transcription_complete.strip())
-        transcription_complete = clean_text_preserve_newlines(transcription_complete)
+        
         
         
         
@@ -1030,7 +1045,32 @@ PUNCTUATION_MAP = {
     ". \n .":"\n ",
     ".\n .":"\n ",
     ".\n.":"\n ",
-    
+    ", .,":".",
+    ",.":".",
+    ", .":".",
+    ", .,":".",
+    ". .":".",
+    ". . .":"...",
+    "deux .":".",
+    "deux.":".",
+    ".," : ".",
+    ".." : ".",
+    ", ,,": ",",
+    ".s.": ".",
+    "s,": "",
+    "\n ..":"\n ",
+    ", ." : ".",
+    ", .,": ".",
+    ". . ." : ".",
+    ". , .": ".",
+    ". ." : ".",
+    ". ,": ".",
+    ", .": ".",
+
+
+
+
+
 
 
 
@@ -1066,42 +1106,4 @@ def remplacer_ponctuation(transcription: str) -> str:
     
     return result
 
-def clean_text_preserve_newlines(text: str) -> str:
-    
-    # # # جایگزینی چند نقطه با یک نقطه
-    # text = re.sub(r'\.{2,}', '.', text)
 
-    # # # جایگزینی چند کاما با یک کاما
-    # text = re.sub(r',{2,}', ',', text)
-
-    # # # جایگزینی الگوهای خاص مثل '. ..' و '. ,.' با یک نقطه
-    text = re.sub(r'\.\s*\.\.', '.', text)
-    text = re.sub(r'\.\.\s*\.', '.', text)
-    text = re.sub(r'\.\,\s*\.', '.', text)
-    text = re.sub(r'\.\s*,\s*\.', '.', text)
-    text = re.sub(r'\.\s*,\s*,\s*\.', '.', text)
-    
-    # # # می‌توانید الگوهای بیشتری را در صورت نیاز اضافه کنید
-
-    # # # جایگزینی کاما دنبال شده توسط نقطه با نقطه
-    # text = re.sub(r',\.+', '.', text)
-
-    # # # جایگزینی نقطه دنبال شده توسط کاما با نقطه
-    # text = re.sub(r'\.,+', '.', text)
-
-    # # # حذف فاصله‌های اضافی قبل از علائم نگارشی
-    # # text = re.sub(r'\s+([.,!?;:])', r'\1', text)
-
-    # # # جایگزینی چند فاصله با یک فاصله
-    # text = re.sub(r'\s{2,}', ' ', text)
-
-    # # # حفظ خط‌های جدیدی که بعد از علائم پایان جمله آمده‌اند
-    # # text = re.sub(r'([.!?])\s*\n\s*', r'\1\n', text)
-
-    # # # حذف خط‌های جدیدی که بعد از علائم پایان جمله نیستند
-    # # text = re.sub(r'(?<![.!?])\n', ' ', text)
-
-    # # # حذف فاصله‌های ابتدایی و انتهایی
-    # # text = text.strip()
-
-    return text
