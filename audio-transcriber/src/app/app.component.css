@@ -53,3 +53,15 @@
     
     transition: all 0.3s ease;
   }
+
+  .brand-text {
+    font-size: 1rem; /* اندازه متن برای موبایل */
+    font-weight: 600;
+    color: #4a5568; /* رنگ متن */
+  }
+  
+  @media (min-width: 768px) {
+    .brand-text {
+      font-size: 1.25rem; /* اندازه متن برای دستگاه‌های متوسط و بزرگتر */
+    }
+  }

@@ -47,7 +47,7 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=2)  # Adjust based on server capacity
+executor = ThreadPoolExecutor(max_workers=4)  # Adjust based on server capacity
 
 # Dictionnaire pour stocker les verrous par utilisateur
 user_locks = defaultdict(asyncio.Lock)
@@ -1045,17 +1045,8 @@ PUNCTUATION_MAP = {
     ". \n .":"\n ",
     ".\n .":"\n ",
     ".\n.":"\n ",
-    ", .,":".",
-    ",.":".",
-    ", .":".",
-    ", .,":".",
-    ". .":".",
-    ". . .":"...",
     "deux .":".",
     "deux.":".",
-    ".," : ".",
-    ".." : ".",
-    ", ,,": ",",
     ".s.": ".",
     "s,": "",
     "\n ..":"\n ",
@@ -1066,6 +1057,15 @@ PUNCTUATION_MAP = {
     ". ." : ".",
     ". ,": ".",
     ", .": ".",
+    ", .,":".",
+    ",.":".",
+    ", .":".",
+    ", .,":".",
+    ". .":".",
+    ". . .":"...",
+    ".," : ".",
+    ".." : ".",
+    ", ,,": ",",
 
 
 
