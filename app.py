@@ -726,7 +726,6 @@ async def update_transcription(
             # Sanitize the filename
             safe_filename = secure_filename(filename)
             if safe_filename:
-                # Update the custom_filename in database
                 upload.custom_filename = safe_filename
                 db.commit()
                 logger.info(f"Filename updated for upload_id: {upload_id}")
@@ -744,8 +743,7 @@ async def update_transcription(
     return {
         "upload_id": upload.id,
         "filename": upload.filename,
-        "transcription_filename": upload.transcription_filename,
-        "custom_filename": upload.custom_filename,  # Add this to your response model
+        "transcription_filename": upload.transcription_filename,  # Add this to your response model
         "upload_time": upload.upload_time.isoformat(),
         "is_archived": upload.is_archived,
         "shared_with": [
