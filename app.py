@@ -47,7 +47,7 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=4)  # Adjust based on server capacity
+executor = ThreadPoolExecutor(max_workers=3)  # Adjust based on server capacity
 
 # Dictionnaire pour stocker les verrous par utilisateur
 user_locks = defaultdict(asyncio.Lock)
@@ -296,19 +296,33 @@ async def upload_audio(
             logger.error(f"Error during transcription: {e}")
             raise HTTPException(status_code=500, detail=f"Erreur lors de la transcription: {e}")
 
-        # Generate transcription filename
+        # ذخیره‌سازی transcription خام
+        raw_transcription_filename = f"{unique_id}_raw_transcription.txt"
+        raw_transcription_path = os.path.join(AUDIO_DIR, raw_transcription_filename)
+
+        try:
+            async with aiofiles.open(raw_transcription_path, "w", encoding="utf-8") as f:
+                await f.write(transcription.strip())
+            logger.info(f"Raw transcription saved to {raw_transcription_path}")
+        except Exception as e:
+            logger.error(f"Error saving raw transcription: {e}")
+            raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription brute.")
+
+        # اعمال اصلاحات متنی
+        cleaned_transcription = remplacer_ponctuation(transcription.strip())
+
+        # ذخیره‌سازی transcription اصلاح شده
         transcription_filename = f"{unique_id}_transcription.txt"
         transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
 
-        # Save transcription asynchronously
         try:
             async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
-                await f.write(transcription.strip())
+                await f.write(cleaned_transcription)
             logger.info(f"Transcription saved to {transcription_path}")
         except Exception as e:
             logger.error(f"Error saving transcription: {e}")
             raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription.")
-
+        
         # Save upload record
         upload_record = Upload(
             filename=new_filename,
@@ -329,7 +343,7 @@ async def upload_audio(
 
         return JSONResponse(
             content={
-                "transcription": transcription.strip(),
+                "transcription": cleaned_transcription.strip(),
                 "transcription_file": transcription_filename,
                 "upload_id": upload_record.id,
                 "model_used": model  # Added to response to show which model was used
@@ -345,7 +359,7 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
         asr_pipeline: The initialized ASR pipeline
 
     Returns:
-        str: The transcribed text with proper word boundaries
+        str: The raw transcribed text without punctuation replacement
     """
     try:
         audio_data, samplerate = sf.read(file_path)
@@ -394,16 +408,11 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
 
-        
-        
-        transcription_complete = remplacer_ponctuation(transcription_complete.strip())
-        
-        
-        
-        
-        
-        logger.info("Transcription completed with proper word boundaries and cleaned text")
-        return transcription_complete
+        # حذف فراخوانی تابع اصلاحات متنی
+        # transcription_complete = remplacer_ponctuation(transcription_complete.strip())
+
+        logger.info("Transcription completed without punctuation replacement")
+        return transcription_complete.strip()
         
     except Exception as e:
         logger.error(f"Failed to process transcription for {file_path}: {e}")
