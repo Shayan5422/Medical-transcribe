@@ -679,8 +679,6 @@ def remplacer_ponctuation(transcription: str) -> str:
         "dollar": "$",
         "pourcentage": "%",
         "arobase": "@",
-        "plus": "+",
-        "moins": "-",
         "égal": "=",
         "crochet ouvrant": "[",
         "crochet fermant": "]",
@@ -726,7 +724,12 @@ def remplacer_ponctuation(transcription: str) -> str:
         "pour mille": "‰",
         "exposant un": "¹",
         "exposant deux": "²",
-        "exposant trois": "³"
+        "exposant trois": "³",
+        ", .": ",",
+        ". .": ".",
+        "..": ".",
+        ". ..": ".",
+        ". . .": "...",
     }
     
     # Sort the keys by length in descending order to handle longer phrases first
