@@ -647,12 +647,7 @@ async def get_transcription(
 
 
 def remplacer_ponctuation(transcription: str) -> str:
-    """
-    Replaces punctuation words with their corresponding punctuation signs in a case-insensitive manner.
-
-    :param transcription: Transcribed text.
-    :return: Text with punctuation replaced.
-    """
+   
     PUNCTUATION_MAP = {
         "point": ".",
         "virgule": ",",
@@ -725,6 +720,24 @@ def remplacer_ponctuation(transcription: str) -> str:
         "exposant un": "¹",
         "exposant deux": "²",
         "exposant trois": "³",
+    }
+    
+    
+    sorted_punctuations = sorted(PUNCTUATION_MAP.keys(), key=len, reverse=True)
+    
+    
+    pattern = re.compile(r'\b(' + '|'.join(re.escape(k) for k in sorted_punctuations) + r')\b', re.IGNORECASE)
+    
+    
+    def replacer(match):
+        word = match.group(0).lower()
+        return PUNCTUATION_MAP.get(word, match.group(0))
+    
+    
+    transcription = pattern.sub(replacer, transcription)
+    
+    
+    ADDITIONAL_REPLACEMENTS = {
         ", .": ",",
         ". .": ".",
         "..": ".",
@@ -736,23 +749,15 @@ def remplacer_ponctuation(transcription: str) -> str:
         "\n,": "\n ",
         ", ..": ",",
         ":.": ":",
+        ",.": ".",
     }
     
-    # Sort the keys by length in descending order to handle longer phrases first
-    sorted_punctuations = sorted(PUNCTUATION_MAP.keys(), key=len, reverse=True)
-    
-    # Create a regex pattern that matches any of the keys, case-insensitive
-    pattern = re.compile(r'\b(' + '|'.join(re.escape(k) for k in sorted_punctuations) + r')\b', re.IGNORECASE)
-    
-    # Function to replace matched words with corresponding punctuation
-    def replacer(match):
-        word = match.group(0).lower()
-        return PUNCTUATION_MAP.get(word, match.group(0))
-    
-    # Perform the substitution
-    transcription = pattern.sub(replacer, transcription)
+   
+    for pattern, replacement in ADDITIONAL_REPLACEMENTS.items():
+        transcription = transcription.replace(pattern, replacement)
     
     return transcription
+
 
 
 @app.delete("/history/{upload_id}")
