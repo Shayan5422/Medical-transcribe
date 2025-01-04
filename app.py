@@ -1,5 +1,6 @@
 # app.py
 import os
+import re
 import librosa
 import torch
 from fastapi import (
@@ -230,7 +231,8 @@ async def upload_audio(
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
-    Ensure that each user can only have one transcription request at a time.
+    Ensures that each user can only have one transcription request at a time.
+    Automatically selects the model based on audio duration.
     """
     logger.info(f"User {user.username} is uploading file: {file.filename} using model: {model}")
 
@@ -287,9 +289,26 @@ async def upload_audio(
                 logger.error(f"Error converting audio: {e}")
                 raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
 
+        # Determine the duration of the audio
+        try:
+            audio_data, samplerate = librosa.load(file_path, sr=None)
+            duration = librosa.get_duration(y=audio_data, sr=samplerate)
+            logger.info(f"Audio duration: {duration:.2f} seconds")
+        except Exception as e:
+            logger.error(f"Error loading audio for duration calculation: {e}")
+            raise HTTPException(status_code=500, detail="Failed to process the audio file.")
+
+        # Select model based on duration
+        if duration > 120:
+            selected_model = "openai/whisper-large-v3"
+            logger.info(f"Audio longer than 2 minutes. Using model: {selected_model}")
+        else:
+            selected_model = model
+            logger.info(f"Audio 2 minutes or shorter. Using model: {selected_model}")
+
         # Retrieve ASR pipeline from cache
         try:
-            asr_pipeline = get_asr_pipeline(model)
+            asr_pipeline = get_asr_pipeline(selected_model)
         except HTTPException as e:
             raise e
 
@@ -338,6 +357,7 @@ async def upload_audio(
                 "transcription": transcription.strip(),
                 "transcription_file": transcription_filename,
                 "upload_id": upload_record.id,
+                "model_used": selected_model  # Inform the user about the model used
             }
         )
 
@@ -625,9 +645,10 @@ async def get_transcription(
     
     return {"transcription": transcription, "is_editor": is_editor}
 
+
 def remplacer_ponctuation(transcription: str) -> str:
     """
-    Replaces punctuation words with their corresponding punctuation signs.
+    Replaces punctuation words with their corresponding punctuation signs in a case-insensitive manner.
 
     :param transcription: Transcribed text.
     :return: Text with punctuation replaced.
@@ -636,8 +657,9 @@ def remplacer_ponctuation(transcription: str) -> str:
         "point": ".",
         "virgule": ",",
         "nouvelle ligne": "\n",
-        "À la ligne": "\n",
-        "a la ligne": "\n",
+        "deux points": ":",
+        "2 points": ":",
+        "à la ligne": "\n",
         "sur la ligne": "\n",
         "point d'exclamation": "!",
         "point d'interrogation": "?",
@@ -660,24 +682,22 @@ def remplacer_ponctuation(transcription: str) -> str:
         "plus": "+",
         "moins": "-",
         "égal": "=",
-        "inférieur": "<",
-        "supérieur": ">",
         "crochet ouvrant": "[",
         "crochet fermant": "]",
         "accolade ouvrante": "{",
         "accolade fermante": "}",
         "entre parenthèses": "(",
-        "Entre parenthèses": "(",
-        "Fermez la parenthèse": ")",
         "fermez la parenthèse": ")",
-        "nouvelle ligne": "\n",
-        "à la ligne": "\n",
-        "ouvrez la parenthèse" : "(",
-        "fermez la parenthèse" : ")",
+        "ouvrez la parenthèse": "(",
         "tiret du 6": "-",
-        "à la ligne:":"\n ",
+        "à la ligne:": "\n ",
+        "à la ligne.": "\n ",
+        "à la ligne .": "\n ",
+        ". à la ligne": "\n ",
         "points de suspension": "...",
         "double point": "..",
+        ". .": ".",
+        ".s": ".",
         "retour chariot": "\r\n",
         "tabulation": "\t",
         "espace insécable": " ",
@@ -709,9 +729,22 @@ def remplacer_ponctuation(transcription: str) -> str:
         "exposant trois": "³"
     }
     
-    for mot, signe in PUNCTUATION_MAP.items():
-        transcription = transcription.replace(mot, signe)
+    # Sort the keys by length in descending order to handle longer phrases first
+    sorted_punctuations = sorted(PUNCTUATION_MAP.keys(), key=len, reverse=True)
+    
+    # Create a regex pattern that matches any of the keys, case-insensitive
+    pattern = re.compile(r'\b(' + '|'.join(re.escape(k) for k in sorted_punctuations) + r')\b', re.IGNORECASE)
+    
+    # Function to replace matched words with corresponding punctuation
+    def replacer(match):
+        word = match.group(0).lower()
+        return PUNCTUATION_MAP.get(word, match.group(0))
+    
+    # Perform the substitution
+    transcription = pattern.sub(replacer, transcription)
+    
     return transcription
+
 
 @app.delete("/history/{upload_id}")
 async def delete_upload(
@@ -820,8 +853,9 @@ async def update_transcription(
         if filename:
             # Sanitize the filename
             safe_filename = secure_filename(filename)
-           
-    
+            upload.filename = safe_filename
+            db.commit()
+            logger.info(f"Filename updated to: {safe_filename}")
     except Exception as e:
         logger.error(f"Error updating transcription or filename: {e}")
         raise HTTPException(
