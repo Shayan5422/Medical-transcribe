@@ -730,6 +730,12 @@ def remplacer_ponctuation(transcription: str) -> str:
         "..": ".",
         ". ..": ".",
         ". . .": "...",
+        "\n.": "\n ",
+        "\n .": "\n ",
+        "\n ,": "\n ",
+        "\n,": "\n ",
+        ", ..": ",",
+        ":.": ":",
     }
     
     # Sort the keys by length in descending order to handle longer phrases first
