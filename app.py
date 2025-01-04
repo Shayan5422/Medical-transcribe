@@ -48,7 +48,7 @@ init_db()
 # Configure a ThreadPoolExecutor for handling transcription tasks
 executor = ThreadPoolExecutor(max_workers=2)  # Adjust based on server capacity
 
-# Dictionnaire pour stocker les verrous par utilisateur
+# Dictionary to store locks per user
 user_locks = defaultdict(asyncio.Lock)
 
 # Dependency to get DB session
@@ -62,7 +62,7 @@ def get_db():
 # CORS configuration
 origins = [
     "https://shaz.ai",
-    "https://backend.shaz.ai",
+    "http://localhost:8000",
     "http://51.15.224.218:4200",
     "http://medtranscribe.fr",
     "https://medtranscribe.fr",
@@ -90,7 +90,7 @@ async def get_current_user(
 ) -> User:
     token_data = decode_access_token(token)
     if token_data is None or token_data.username is None:
-        logger.warning("Token invalide ou manquant.")
+        logger.warning("Invalid or missing token.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -98,7 +98,7 @@ async def get_current_user(
         )
     user = db.query(User).filter(User.username == token_data.username).first()
     if user is None:
-        logger.warning(f"Utilisateur non trouvé: {token_data.username}")
+        logger.warning(f"User not found: {token_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
@@ -123,14 +123,53 @@ else:
     torch_dtype = torch.float32
     logger.info("Using CPU for both PyTorch and Transformers pipeline.")
 
-
-
-
-
-
 # Directory to store audio files
 AUDIO_DIR = "audio_files"
 os.makedirs(AUDIO_DIR, exist_ok=True)
+
+# Global cache for ASR pipelines
+models_cache = {}
+
+def get_asr_pipeline(model_name: str):
+    """
+    Retrieves the ASR pipeline from the cache or loads it if not present.
+
+    Args:
+        model_name: The name/path of the ASR model.
+
+    Returns:
+        The ASR pipeline instance.
+    """
+    if model_name not in models_cache:
+        try:
+            logger.info(f"Loading ASR model: {model_name}")
+            model_instance = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_name, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
+            )
+            model_instance.to(torch_device)
+            processor = AutoProcessor.from_pretrained(model_name)
+
+            asr_pipeline_instance = pipeline(
+                "automatic-speech-recognition",
+                model=model_instance,
+                tokenizer=processor.tokenizer,
+                feature_extractor=processor.feature_extractor,
+                chunk_length_s=30,
+                batch_size=16,
+                torch_dtype=torch_dtype,
+                device=pipeline_device,
+                generate_kwargs={"language": "french"},
+            )
+
+            models_cache[model_name] = asr_pipeline_instance
+            logger.info(f"ASR model loaded and cached: {model_name}")
+        except Exception as e:
+            logger.error(f"Error loading ASR model '{model_name}': {e}")
+            raise HTTPException(status_code=500, detail=f"Error loading model: {e}")
+    else:
+        logger.info(f"ASR model retrieved from cache: {model_name}")
+
+    return models_cache[model_name]
 
 @app.post("/register/", response_model=Token)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -219,7 +258,7 @@ async def upload_audio(
 
         if content_type_main not in supported_types:
             logger.warning(f"Unsupported file type: {content_type_main}")
-            raise HTTPException(status_code=400, detail="Format de fichier audio non supporté.")
+            raise HTTPException(status_code=400, detail="Unsupported audio file format.")
 
         # Save uploaded audio file asynchronously
         file_path = os.path.join(AUDIO_DIR, new_filename)
@@ -230,7 +269,7 @@ async def upload_audio(
             logger.info(f"File saved to {file_path}")
         except Exception as e:
             logger.error(f"Error saving uploaded file: {e}")
-            raise HTTPException(status_code=500, detail="Échec de la sauvegarde du fichier téléchargé.")
+            raise HTTPException(status_code=500, detail="Failed to save the uploaded file.")
 
         # Convert to WAV if necessary
         if content_type_main != "audio/wav":
@@ -246,31 +285,13 @@ async def upload_audio(
                 logger.info(f"Converted file to {wav_path}")
             except Exception as e:
                 logger.error(f"Error converting audio: {e}")
-                raise HTTPException(status_code=400, detail=f"Erreur lors de la conversion de l'audio: {e}")
+                raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
 
-        # Load model and processor based on selected model
+        # Retrieve ASR pipeline from cache
         try:
-            model_instance = AutoModelForSpeechSeq2Seq.from_pretrained(
-                model, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
-            )
-            model_instance.to(torch_device)
-            processor = AutoProcessor.from_pretrained(model)
-
-            # Create ASR pipeline with optimized settings
-            asr_pipeline = pipeline(
-                "automatic-speech-recognition",
-                model=model_instance,
-                tokenizer=processor.tokenizer,
-                feature_extractor=processor.feature_extractor,
-                chunk_length_s=30,
-                batch_size=16,
-                torch_dtype=torch_dtype,
-                device=pipeline_device,
-                generate_kwargs={"language": "french"},
-            )
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
-            raise HTTPException(status_code=500, detail=f"Erreur lors du chargement du modèle: {e}")
+            asr_pipeline = get_asr_pipeline(model)
+        except HTTPException as e:
+            raise e
 
         # Process transcription in a separate thread
         try:
@@ -279,7 +300,7 @@ async def upload_audio(
             )
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
-            raise HTTPException(status_code=500, detail=f"Erreur lors de la transcription: {e}")
+            raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
 
         # Generate transcription filename
         transcription_filename = f"{unique_id}_transcription.txt"
@@ -292,7 +313,7 @@ async def upload_audio(
             logger.info(f"Transcription saved to {transcription_path}")
         except Exception as e:
             logger.error(f"Error saving transcription: {e}")
-            raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription.")
+            raise HTTPException(status_code=500, detail="Failed to save the transcription.")
 
         # Save upload record
         upload_record = Upload(
@@ -309,7 +330,7 @@ async def upload_audio(
             logger.error(f"Database commit failed: {e}")
             raise HTTPException(
                 status_code=500, 
-                detail="Échec de la sauvegarde de l'enregistrement de l'upload dans la base de données."
+                detail="Failed to save the upload record in the database."
             )
 
         return JSONResponse(
@@ -320,14 +341,57 @@ async def upload_audio(
             }
         )
 
+def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29, overlap_duration: int = 1) -> List[np.ndarray]:
+    """
+    Divides audio into segments with a maximum duration and specified overlap.
+
+    :param audio: Numpy array containing audio data
+    :param samplerate: Sampling rate in Hz
+    :param duree_max: Maximum duration of each segment in seconds
+    :param overlap_duration: Duration of overlap between segments in seconds
+    :return: List of audio segments
+    """
+    frames_max = int(duree_max * samplerate)
+    overlap_frames = int(overlap_duration * samplerate)
+    total_frames = len(audio)
+    segments = []
+    start = 0
+
+    while start < total_frames:
+        end = start + frames_max
+        segment = audio[start:end]
+        segments.append(segment)
+        start += frames_max - overlap_frames  # Move start with overlap
+
+    return segments
+
+def diviser_audio_silence(audio: np.ndarray, samplerate: int = 16000, top_db: int = 30, min_silence_duration: float = 0.5) -> List[np.ndarray]:
+    """
+    Divides audio into segments based on silence.
+
+    :param audio: Numpy array containing audio data
+    :param samplerate: Sampling rate in Hz
+    :param top_db: The threshold (in decibels) below reference to consider as silence
+    :param min_silence_duration: Minimum duration of silence to split (in seconds)
+    :return: List of audio segments
+    """
+    intervals = librosa.effects.split(audio, top_db=top_db, hop_length=512)
+
+    segments = []
+    for start, end in intervals:
+        segment = audio[start:end]
+        segments.append(segment)
+
+    return segments
+
 def process_transcription(file_path: str, asr_pipeline) -> str:
     """
     Process audio transcription in a separate thread.
-    
+
     Args:
         file_path: Path to the audio file
         asr_pipeline: The initialized ASR pipeline to use for transcription
-    
+
     Returns:
         str: The transcribed text
     """
@@ -341,10 +405,37 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
             samplerate = 16000
             logger.info(f"Audio resampled to {samplerate} Hz")
 
-        segments = diviser_audio(audio_data, samplerate, duree_max=29)
-        logger.info(f"Audio divided into {len(segments)} segment(s).")
+        # Choose segmentation method: overlapping or silence-based
+        # For this example, we'll use overlapping segments
+        overlap_duration = 1  # 1 second overlap
+        segments = diviser_audio(audio_data, samplerate, duree_max=29, overlap_duration=overlap_duration)
+        logger.info(f"Audio divided into {len(segments)} segment(s) with overlapping.")
 
         transcription_complete = ""
+
+        for idx, segment in enumerate(segments):
+            try:
+                logger.info(f"Processing segment {idx + 1}/{len(segments)}")
+                transcription = asr_pipeline(segment)["text"]
+
+                # If not the first segment, remove the first 'overlap_duration' seconds worth of words
+                if idx > 0:
+                    # Heuristic: Remove a proportion of words based on overlap_duration
+                    words = transcription.split()
+                    words_to_remove = max(1, int(len(words) * (overlap_duration / 29)))
+                    transcription = ' '.join(words[words_to_remove:])
+
+                transcription_complete += transcription + " "
+                logger.info(f"Segment {idx + 1} transcription: {transcription}")
+            except Exception as e:
+                logger.error(f"Error processing segment {idx + 1}: {e}")
+                raise e
+
+        # Optionally, you can use silence-based segmentation instead
+        # Uncomment the following lines to use silence-based segmentation
+        """
+        segments = diviser_audio_silence(audio_data, samplerate, top_db=30, min_silence_duration=0.5)
+        logger.info(f"Audio divided into {len(segments)} segment(s) based on silence.")
 
         for idx, segment in enumerate(segments):
             try:
@@ -355,12 +446,13 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
             except Exception as e:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
+        """
 
         # Replace punctuation words with corresponding signs
         transcription_complete = remplacer_ponctuation(transcription_complete)
         logger.info("Punctuation replaced in complete transcription.")
 
-        return transcription_complete
+        return transcription_complete.strip()
     except Exception as e:
         logger.error(f"Failed to process transcription for {file_path}: {e}")
         raise e
@@ -374,7 +466,7 @@ async def download_transcription(
     """Endpoint to download the transcription of a specific upload.
     Allows access for both owners and users with shared access."""
     
-    # Vérifier l'accès de l'utilisateur
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -385,7 +477,7 @@ async def download_transcription(
     ).first()
 
     if not upload:
-        logger.warning(f"Transcription non trouvée ou accès refusé pour upload_id: {upload_id}")
+        logger.warning(f"Transcription not found or access denied for upload_id: {upload_id}")
         raise HTTPException(
             status_code=404, 
             detail="Transcription not found or access denied"
@@ -411,7 +503,7 @@ async def download_audio(
     """Endpoint to download the audio file.
     Allows access for both owners and users with shared access."""
     
-    # Vérifier l'accès de l'utilisateur
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -446,7 +538,7 @@ async def get_history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Obtenir l'historique des uploads de l'utilisateur avec des filtres optionnels."""
+    """Get the upload history of the user with optional filters."""
     query = db.query(Upload)
     
     if include_shared:
@@ -491,19 +583,19 @@ async def get_transcription(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Endpoint pour récupérer le texte de transcription d'un enregistrement spécifique."""
+    """Endpoint to retrieve the transcription text of a specific record."""
     upload = db.query(Upload).filter(Upload.id == upload_id).first()
     
     if not upload:
         logger.warning(f"Upload not found: {upload_id}")
-        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+        raise HTTPException(status_code=404, detail="Record not found")
         
-    # Vérifier si l'utilisateur a accès
+    # Check if the user has access
     has_access = False
     is_editor = False
     if upload.owner_id == current_user.id:
         has_access = True
-        is_editor = True  # Propriétaire a accès en tant qu'éditeur
+        is_editor = True  # Owner has editor access
     else:
         share = db.query(Share).filter(
             Share.upload_id == upload_id,
@@ -516,12 +608,12 @@ async def get_transcription(
     
     if not has_access:
         logger.warning(f"Access denied for user {current_user.username} to upload {upload_id}")
-        raise HTTPException(status_code=403, detail="Accès refusé")
+        raise HTTPException(status_code=403, detail="Access denied")
     
     transcription_path = os.path.join(AUDIO_DIR, upload.transcription_filename)
     if not os.path.exists(transcription_path):
         logger.error(f"Transcription file not found: {transcription_path}")
-        raise HTTPException(status_code=404, detail="Fichier de transcription non trouvé")
+        raise HTTPException(status_code=404, detail="Transcription file not found")
     
     try:
         async with aiofiles.open(transcription_path, "r", encoding="utf-8") as f:
@@ -529,31 +621,97 @@ async def get_transcription(
         logger.info(f"Transcription retrieved for upload_id: {upload_id}")
     except Exception as e:
         logger.error(f"Error reading transcription file: {e}")
-        raise HTTPException(status_code=500, detail="Échec de la lecture du fichier de transcription")
+        raise HTTPException(status_code=500, detail="Failed to read the transcription file")
     
     return {"transcription": transcription, "is_editor": is_editor}
 
-def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29) -> List[np.ndarray]:
+def remplacer_ponctuation(transcription: str) -> str:
     """
-    Divides audio into segments with a maximum duration.
+    Replaces punctuation words with their corresponding punctuation signs.
 
-    :param audio: Numpy array containing audio data
-    :param samplerate: Sampling rate in Hz
-    :param duree_max: Maximum duration of each segment in seconds
-    :return: List of audio segments
+    :param transcription: Transcribed text.
+    :return: Text with punctuation replaced.
     """
-    frames_max = int(duree_max * samplerate)
-    total_frames = len(audio)
-    segments = []
-    nombre_segments = math.ceil(total_frames / frames_max)
-
-    for i in range(nombre_segments):
-        start = i * frames_max
-        end = start + frames_max
-        segment = audio[start:end]
-        segments.append(segment)
-
-    return segments
+    PUNCTUATION_MAP = {
+        "point": ".",
+        "virgule": ",",
+        "nouvelle ligne": "\n",
+        "À la ligne": "\n",
+        "a la ligne": "\n",
+        "sur la ligne": "\n",
+        "point d'exclamation": "!",
+        "point d'interrogation": "?",
+        "deux points": ":",
+        "point-virgule": ";",
+        "trait d'union": "-",
+        "parenthèse ouvrante": "(",
+        "parenthèse fermante": ")",
+        "guillemets ouvrants": "«",
+        "guillemets fermants": "»",
+        "apostrophe": "'",
+        "barre oblique": "/",
+        "barre oblique inversée": "\\",
+        "astérisque": "*",
+        "tilde": "~",
+        "dièse": "#",
+        "dollar": "$",
+        "pourcentage": "%",
+        "arobase": "@",
+        "plus": "+",
+        "moins": "-",
+        "égal": "=",
+        "inférieur": "<",
+        "supérieur": ">",
+        "crochet ouvrant": "[",
+        "crochet fermant": "]",
+        "accolade ouvrante": "{",
+        "accolade fermante": "}",
+        "entre parenthèses": "(",
+        "Entre parenthèses": "(",
+        "Fermez la parenthèse": ")",
+        "fermez la parenthèse": ")",
+        "nouvelle ligne": "\n",
+        "à la ligne": "\n",
+        "ouvrez la parenthèse" : "(",
+        "fermez la parenthèse" : ")",
+        "tiret du 6": "-",
+        "à la ligne:":"\n ",
+        "points de suspension": "...",
+        "double point": "..",
+        "retour chariot": "\r\n",
+        "tabulation": "\t",
+        "espace insécable": " ",
+        "puce": "•",
+        "tiret cadratin": "—",
+        "tiret demi-cadratin": "–",
+        "plus ou moins": "±",
+        "multiplié": "×",
+        "divisé": "÷",
+        "degré": "°",
+        "micro": "µ",
+        "paragraphe": "§",
+        "copyright": "©️",
+        "guillemets anglais ouvrants": "\"",
+        "guillemets anglais fermants": "\"",
+        "guillemets simples ouvrants": "'",
+        "guillemets simples fermants": "'",
+        "flèche droite": "→",
+        "flèche gauche": "←",
+        "flèche haut": "↑",
+        "flèche bas": "↓",
+        "inférieur ou égal": "≤",
+        "supérieur ou égal": "≥",
+        "différent": "≠",
+        "environ": "≈",
+        "pour mille": "‰",
+        "exposant un": "¹",
+        "exposant deux": "²",
+        "exposant trois": "³"
+    }
+    
+    for mot, signe in PUNCTUATION_MAP.items():
+        transcription = transcription.replace(mot, signe)
+    return transcription
 
 @app.delete("/history/{upload_id}")
 async def delete_upload(
@@ -586,7 +744,7 @@ async def delete_upload(
         logger.error(f"Error deleting files: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete associated files.")
 
-    # Supprimer les partages associés
+    # Delete associated shares
     try:
         shares = db.query(Share).filter(Share.upload_id == upload_id).all()
         for share in shares:
@@ -622,7 +780,7 @@ async def update_transcription(
     
     if not upload:
         logger.warning(f"Upload not found: {upload_id}")
-        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+        raise HTTPException(status_code=404, detail="Record not found")
     
     # Check permissions
     is_editor = False
@@ -641,7 +799,7 @@ async def update_transcription(
         logger.warning(f"User {current_user.username} lacks permission to edit upload {upload_id}")
         raise HTTPException(
             status_code=403, 
-            detail="Vous n'avez pas la permission de modifier cette transcription"
+            detail="You do not have permission to modify this transcription"
         )
     
     # Update transcription file
@@ -650,7 +808,7 @@ async def update_transcription(
         logger.error(f"Transcription file not found: {transcription_path}")
         raise HTTPException(
             status_code=404, 
-            detail="Fichier de transcription non trouvé"
+            detail="Transcription file not found"
         )
     
     try:
@@ -662,17 +820,13 @@ async def update_transcription(
         if filename:
             # Sanitize the filename
             safe_filename = secure_filename(filename)
-            if safe_filename:
-                # Update the custom_filename in database
-                upload.custom_filename = safe_filename
-                db.commit()
-                logger.info(f"Filename updated for upload_id: {upload_id}")
+            
     
     except Exception as e:
         logger.error(f"Error updating transcription or filename: {e}")
         raise HTTPException(
             status_code=500, 
-            detail="Échec de la mise à jour de la transcription ou du nom de fichier"
+            detail="Failed to update transcription or filename"
         )
     
     # Update database if needed
@@ -682,7 +836,7 @@ async def update_transcription(
         "upload_id": upload.id,
         "filename": upload.filename,
         "transcription_filename": upload.transcription_filename,
-        "custom_filename": upload.custom_filename,  # Add this to your response model
+
         "upload_time": upload.upload_time.isoformat(),
         "is_archived": upload.is_archived,
         "shared_with": [
@@ -701,7 +855,7 @@ async def stream_audio(
     """Stream an audio file with proper headers for HTML5 audio player.
     Allows access for both owners and users with shared access."""
     
-    # Vérifier l'accès de l'utilisateur
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -739,7 +893,7 @@ async def toggle_archive_status(
     db: Session = Depends(get_db)
 ):
     """Toggle the archive status of an upload."""
-    # Vérifier que l'utilisateur a accès
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -785,9 +939,9 @@ async def share_with_user(
     db: Session = Depends(get_db)
 ):
     """
-    Partager un enregistrement avec un utilisateur spécifiant le type d'accès.
+    Share a record with a user specifying the type of access.
     """
-    # Vérifier que l'enregistrement appartient à l'utilisateur actuel
+    # Check if the record belongs to the current user
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
         Upload.owner_id == current_user.id
@@ -795,27 +949,27 @@ async def share_with_user(
     
     if not upload:
         logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
-        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+        raise HTTPException(status_code=404, detail="Record not found")
 
-    # Vérifier que l'utilisateur cible existe
+    # Check if the target user exists
     target_user = db.query(User).filter(User.id == share.user_id).first()
     if not target_user:
         logger.warning(f"Target user not found: {share.user_id}")
-        raise HTTPException(status_code=404, detail="Utilisateur cible non trouvé")
+        raise HTTPException(status_code=404, detail="Target user not found")
     
-    # Vérifier le type d'accès
+    # Validate access type
     if share.access_type not in ['viewer', 'editor']:
         logger.warning(f"Invalid access type: {share.access_type}")
-        raise HTTPException(status_code=400, detail="Type d'accès invalide")
+        raise HTTPException(status_code=400, detail="Invalid access type")
     
-    # Vérifier si le partage existe déjà
+    # Check if the share already exists
     existing_share = db.query(Share).filter(
         Share.upload_id == upload_id,
         Share.user_id == share.user_id
     ).first()
     
     if existing_share:
-        existing_share.access_type = share.access_type  # Mettre à jour le type d'accès
+        existing_share.access_type = share.access_type  # Update access type
         logger.info(f"Updated existing share for user {share.user_id} on upload {upload_id}")
     else:
         new_share = Share(
@@ -844,9 +998,9 @@ async def remove_share(
     db: Session = Depends(get_db)
 ):
     """
-    Supprimer le partage d'un enregistrement avec un utilisateur.
+    Remove the sharing of a record with a user.
     """
-    # Vérifier que l'enregistrement appartient à l'utilisateur actuel
+    # Check if the record belongs to the current user
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
         Upload.owner_id == current_user.id
@@ -854,9 +1008,9 @@ async def remove_share(
     
     if not upload:
         logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
-        raise HTTPException(status_code=404, detail="Enregistrement non trouvé")
+        raise HTTPException(status_code=404, detail="Record not found")
     
-    # Trouver le partage
+    # Find the share
     share = db.query(Share).filter(
         Share.upload_id == upload_id,
         Share.user_id == user_id
@@ -864,7 +1018,7 @@ async def remove_share(
     
     if not share:
         logger.warning(f"Share not found for user {user_id} on upload {upload_id}")
-        raise HTTPException(status_code=404, detail="Partage non trouvé")
+        raise HTTPException(status_code=404, detail="Share not found")
     
     db.delete(share)
     try:
@@ -875,96 +1029,8 @@ async def remove_share(
         logger.error(f"Error removing share: {e}")
         raise HTTPException(status_code=500, detail="Failed to remove share")
     
-    return {"message": "Accès de partage supprimé avec succès"}
+    return {"message": "Share access removed successfully"}
 
-# Punctuation mapping and replacement function
-PUNCTUATION_MAP = {
-    "point": ".",
-    "virgule": ",",
-    "nouvelle ligne": "\n",
-    "À la ligne": "\n",
-    "a la ligne": "\n",
-    "sur la ligne": "\n",
-    "point d'exclamation": "!",
-    "point d'interrogation": "?",
-    "deux points": ":",
-    "point-virgule": ";",
-    "trait d'union": "-",
-    "parenthèse ouvrante": "(",
-    "parenthèse fermante": ")",
-    "guillemets ouvrants": "«",
-    "guillemets fermants": "»",
-    "apostrophe": "'",
-    "barre oblique": "/",
-    "barre oblique inversée": "\\",
-    "astérisque": "*",
-    "tilde": "~",
-    "dièse": "#",
-    "dollar": "$",
-    "pourcentage": "%",
-    "arobase": "@",
-    "plus": "+",
-    "moins": "-",
-    "égal": "=",
-    "inférieur": "<",
-    "supérieur": ">",
-    "crochet ouvrant": "[",
-    "crochet fermant": "]",
-    "accolade ouvrante": "{",
-    "accolade fermante": "}",
-    "entre parenthèses": "(",
-    "Entre parenthèses": "(",
-    "Fermez la parenthèse": ")",
-    "fermez la parenthèse": ")",
-    "nouvelle ligne": "\n",
-    "à la ligne": "\n",
-    "ouvrez la parenthèse" : "(",
-    "fermez la parenthèse" : ")",
-    "tiret du 6": "-",
-    "à la ligne:":"\n ",
-    "points de suspension": "...",
-    "double point": "..",
-    "retour chariot": "\r\n",
-    "tabulation": "\t",
-    "espace insécable": " ",
-    "puce": "•",
-    "tiret cadratin": "—",
-    "tiret demi-cadratin": "–",
-    "plus ou moins": "±",
-    "multiplié": "×",
-    "divisé": "÷",
-    "degré": "°",
-    "micro": "µ",
-    "paragraphe": "§",
-    "copyright": "©️",
-    "guillemets anglais ouvrants": """,
-    "guillemets anglais fermants": """,
-    "guillemets simples ouvrants": "'",
-    "guillemets simples fermants": "'",
-    "flèche droite": "→",
-    "flèche gauche": "←",
-    "flèche haut": "↑",
-    "flèche bas": "↓",
-    "inférieur ou égal": "≤",
-    "supérieur ou égal": "≥",
-    "différent": "≠",
-    "environ": "≈",
-    "pour mille": "‰",
-    "exposant un": "¹",
-    "exposant deux": "²",
-    "exposant trois": "³"
+# Additional Optimizations and Helper Functions are already integrated above
 
-
-
-}
-
-def remplacer_ponctuation(transcription: str) -> str:
-    """
-    Remplace les mots de ponctuation par les signes de ponctuation correspondants.
-
-    :param transcription: Texte de la transcription.
-    :return: Texte avec ponctuation remplacée.
-    """
-    for mot, signe in PUNCTUATION_MAP.items():
-        transcription = transcription.replace(mot, signe)
-    return transcription
+# If you have additional endpoints or functionalities, add them below as needed.
