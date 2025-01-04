@@ -47,7 +47,7 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=2)  # Adjust based on server capacity
+executor = ThreadPoolExecutor(max_workers=3)  # Adjust based on server capacity
 
 # Dictionary to store locks per user
 user_locks = defaultdict(asyncio.Lock)
