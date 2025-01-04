@@ -1,4 +1,5 @@
 # app.py
+import re
 import os
 import librosa
 import torch
@@ -46,7 +47,7 @@ app = FastAPI()
 init_db()
 
 # Configure a ThreadPoolExecutor for handling transcription tasks
-executor = ThreadPoolExecutor(max_workers=2)  # Adjust based on server capacity
+executor = ThreadPoolExecutor(max_workers=3)  # Adjust based on server capacity
 
 # Dictionary to store locks per user
 user_locks = defaultdict(asyncio.Lock)
@@ -230,9 +231,9 @@ async def upload_audio(
 ):
     """
     Endpoint to upload an audio file and receive its transcription.
-    Ensure that each user can only have one transcription request at a time.
+    Automatically switches to whisper-large-v3 for files longer than 2 minutes.
     """
-    logger.info(f"User {user.username} is uploading file: {file.filename} using model: {model}")
+    logger.info(f"User {user.username} is uploading file: {file.filename}")
 
     # Get user-specific lock
     user_lock = user_locks[user.id]
@@ -287,7 +288,25 @@ async def upload_audio(
                 logger.error(f"Error converting audio: {e}")
                 raise HTTPException(status_code=400, detail=f"Error converting audio: {e}")
 
+<<<<<<< HEAD
         # Retrieve ASR pipeline from cache
+=======
+        # Check audio duration and select appropriate model
+        try:
+            audio_data, samplerate = sf.read(file_path)
+            duration_seconds = len(audio_data) / samplerate
+            
+            if duration_seconds > 120:  # If longer than 2 minutes
+                model = "openai/whisper-large-v3"
+                logger.info(f"Audio duration: {duration_seconds}s. Switching to full model.")
+            else:
+                logger.info(f"Audio duration: {duration_seconds}s. Using turbo model.")
+        except Exception as e:
+            logger.error(f"Error checking audio duration: {e}")
+            raise HTTPException(status_code=500, detail="Erreur lors de la vérification de la durée audio.")
+
+        # Load model and processor based on selected model
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
         try:
             asr_pipeline = get_asr_pipeline(model)
         except HTTPException as e:
@@ -302,19 +321,38 @@ async def upload_audio(
             logger.error(f"Error during transcription: {e}")
             raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
 
-        # Generate transcription filename
+        # ذخیره‌سازی transcription خام
+        raw_transcription_filename = f"{unique_id}_raw_transcription.txt"
+        raw_transcription_path = os.path.join(AUDIO_DIR, raw_transcription_filename)
+
+        try:
+            async with aiofiles.open(raw_transcription_path, "w", encoding="utf-8") as f:
+                await f.write(transcription.strip())
+            logger.info(f"Raw transcription saved to {raw_transcription_path}")
+        except Exception as e:
+            logger.error(f"Error saving raw transcription: {e}")
+            raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription brute.")
+
+        # اعمال اصلاحات متنی
+        cleaned_transcription = remplacer_ponctuation(transcription.strip())
+
+        # ذخیره‌سازی transcription اصلاح شده
         transcription_filename = f"{unique_id}_transcription.txt"
         transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
 
-        # Save transcription asynchronously
         try:
             async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
-                await f.write(transcription.strip())
+                await f.write(cleaned_transcription)
             logger.info(f"Transcription saved to {transcription_path}")
         except Exception as e:
             logger.error(f"Error saving transcription: {e}")
+<<<<<<< HEAD
             raise HTTPException(status_code=500, detail="Failed to save the transcription.")
 
+=======
+            raise HTTPException(status_code=500, detail="Échec de la sauvegarde de la transcription.")
+        
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
         # Save upload record
         upload_record = Upload(
             filename=new_filename,
@@ -335,9 +373,10 @@ async def upload_audio(
 
         return JSONResponse(
             content={
-                "transcription": transcription.strip(),
+                "transcription": cleaned_transcription.strip(),
                 "transcription_file": transcription_filename,
                 "upload_id": upload_record.id,
+                "model_used": model  # Added to response to show which model was used
             }
         )
 
@@ -386,16 +425,23 @@ def diviser_audio_silence(audio: np.ndarray, samplerate: int = 16000, top_db: in
 
 def process_transcription(file_path: str, asr_pipeline) -> str:
     """
+<<<<<<< HEAD
     Process audio transcription in a separate thread.
 
     Args:
         file_path: Path to the audio file
         asr_pipeline: The initialized ASR pipeline to use for transcription
+=======
+    Process audio transcription with improved segment handling.
+
+    Args:
+        file_path: Path to the audio file
+        asr_pipeline: The initialized ASR pipeline
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
 
     Returns:
-        str: The transcribed text
+        str: The raw transcribed text without punctuation replacement
     """
-    logger.info(f"Processing transcription for {file_path}")
     try:
         audio_data, samplerate = sf.read(file_path)
         logger.info(f"Audio data loaded: {len(audio_data)} samples at {samplerate} Hz")
@@ -405,17 +451,25 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
             samplerate = 16000
             logger.info(f"Audio resampled to {samplerate} Hz")
 
+<<<<<<< HEAD
         # Choose segmentation method: overlapping or silence-based
         # For this example, we'll use overlapping segments
         overlap_duration = 1  # 1 second overlap
         segments = diviser_audio(audio_data, samplerate, duree_max=29, overlap_duration=overlap_duration)
         logger.info(f"Audio divided into {len(segments)} segment(s) with overlapping.")
+=======
+        # Use overlapping segments
+        segments = diviser_audio(audio_data, samplerate, duree_max=29, overlap_seconds=2.0)
+        logger.info(f"Audio divided into {len(segments)} overlapping segments")
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
 
         transcription_complete = ""
+        previous_segment_end = ""
 
         for idx, segment in enumerate(segments):
             try:
                 logger.info(f"Processing segment {idx + 1}/{len(segments)}")
+<<<<<<< HEAD
                 transcription = asr_pipeline(segment)["text"]
 
                 # If not the first segment, remove the first 'overlap_duration' seconds worth of words
@@ -443,19 +497,51 @@ def process_transcription(file_path: str, asr_pipeline) -> str:
                 transcription = asr_pipeline(segment)["text"]
                 transcription_complete += transcription + " "
                 logger.info(f"Segment {idx + 1} transcription: {transcription}")
+=======
+                transcription = asr_pipeline(segment)["text"].strip()
+                
+                # Handle overlap between segments
+                if idx > 0:
+                    # Find the overlapping part and merge properly
+                    words = transcription.split()
+                    prev_words = previous_segment_end.split()
+                    
+                    # Look for overlap between segments
+                    overlap_found = False
+                    for i in range(1, min(len(prev_words), len(words)) + 1):
+                        if prev_words[-i:] == words[:i]:
+                            transcription = " ".join(words[i:])
+                            overlap_found = True
+                            break
+                            
+                    if not overlap_found:
+                        # If no clear overlap found, use a space to separate
+                        transcription = " " + transcription
+                
+                transcription_complete += transcription
+                previous_segment_end = transcription[-100:]  # Keep last portion for overlap check
+                logger.info(f"Segment {idx + 1} processed successfully")
+                
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
             except Exception as e:
                 logger.error(f"Error processing segment {idx + 1}: {e}")
                 raise e
         """
 
-        # Replace punctuation words with corresponding signs
-        transcription_complete = remplacer_ponctuation(transcription_complete)
-        logger.info("Punctuation replaced in complete transcription.")
+        # حذف فراخوانی تابع اصلاحات متنی
+        # transcription_complete = remplacer_ponctuation(transcription_complete.strip())
 
+<<<<<<< HEAD
         return transcription_complete.strip()
+=======
+        logger.info("Transcription completed without punctuation replacement")
+        return transcription_complete.strip()
+        
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
     except Exception as e:
         logger.error(f"Failed to process transcription for {file_path}: {e}")
         raise e
+
 
 @app.get("/download-transcription/{upload_id}")
 async def download_transcription(
@@ -625,6 +711,7 @@ async def get_transcription(
     
     return {"transcription": transcription, "is_editor": is_editor}
 
+<<<<<<< HEAD
 def remplacer_ponctuation(transcription: str) -> str:
     """
     Replaces punctuation words with their corresponding punctuation signs.
@@ -712,6 +799,47 @@ def remplacer_ponctuation(transcription: str) -> str:
     for mot, signe in PUNCTUATION_MAP.items():
         transcription = transcription.replace(mot, signe)
     return transcription
+=======
+def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29, overlap_seconds: float = 2.0) -> List[np.ndarray]:
+    """
+    Divides audio into segments with overlap to avoid word truncation.
+    
+    Args:
+        audio: Numpy array containing audio data
+        samplerate: Sampling rate in Hz
+        duree_max: Maximum duration of each segment in seconds
+        overlap_seconds: Overlap duration between segments in seconds
+        
+    Returns:
+        List of audio segments with overlap
+    """
+    frames_max = int(duree_max * samplerate)
+    overlap_frames = int(overlap_seconds * samplerate)
+    total_frames = len(audio)
+    segments = []
+    
+    # Calculate number of segments needed with overlap
+    effective_segment_length = frames_max - overlap_frames
+    nombre_segments = math.ceil((total_frames - overlap_frames) / effective_segment_length)
+    
+    for i in range(nombre_segments):
+        # Calculate start and end positions with overlap
+        start = i * (frames_max - overlap_frames)
+        end = min(start + frames_max, total_frames)
+        
+        # Create segment with overlap
+        segment = audio[start:end]
+        
+        # Add extra silence padding if needed for last segment
+        if len(segment) < frames_max:
+            padding_length = frames_max - len(segment)
+            segment = np.pad(segment, (0, padding_length), mode='constant')
+            
+        segments.append(segment)
+    
+    return segments
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
+
 
 @app.delete("/history/{upload_id}")
 async def delete_upload(
@@ -820,7 +948,14 @@ async def update_transcription(
         if filename:
             # Sanitize the filename
             safe_filename = secure_filename(filename)
+<<<<<<< HEAD
             
+=======
+            if safe_filename:
+                upload.custom_filename = safe_filename
+                db.commit()
+                logger.info(f"Filename updated for upload_id: {upload_id}")
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
     
     except Exception as e:
         logger.error(f"Error updating transcription or filename: {e}")
@@ -835,8 +970,12 @@ async def update_transcription(
     return {
         "upload_id": upload.id,
         "filename": upload.filename,
+<<<<<<< HEAD
         "transcription_filename": upload.transcription_filename,
 
+=======
+        "transcription_filename": upload.transcription_filename,  # Add this to your response model
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb
         "upload_time": upload.upload_time.isoformat(),
         "is_archived": upload.is_archived,
         "shared_with": [
@@ -1031,6 +1170,176 @@ async def remove_share(
     
     return {"message": "Share access removed successfully"}
 
+<<<<<<< HEAD
 # Additional Optimizations and Helper Functions are already integrated above
 
 # If you have additional endpoints or functionalities, add them below as needed.
+=======
+# Punctuation mapping and replacement function
+PUNCTUATION_MAP = {
+    "point": ".",
+    "point .": ".",
+    "point.": ".",
+    "point,": ".",
+    "point ,": ".",
+    ". point ": ".",
+    ".point ": ".",
+    ",point ": ".",
+    ", point ": ".",
+    "virgule": ",",
+    "nouvelle ligne": "\n",
+    "À la ligne": "\n",
+    "a la ligne": "\n",
+    "sur la ligne": "\n",
+    "point d'exclamation": "!",
+    "point d'interrogation": "?",
+    "deux points": ":",
+    "2 points": ":",
+    "2 point": ":",
+    "2point": ":",
+    "2points": ":",
+    "2.": ":",
+    "2 .": ":",
+    "deux point": ":",
+    "point-virgule": ";",
+    "trait d'union": "-",
+    "parenthèse ouvrante": "(",
+    "parenthèse fermante": ")",
+    "guillemets ouvrants": "«",
+    "guillemets fermants": "»",
+    "apostrophe": "'",
+    "barre oblique": "/",
+    "barre oblique inversée": "\\",
+    "astérisque": "*",
+    "tilde": "~",
+    "dièse": "#",
+    "dollar": "$",
+    "pourcentage": "%",
+    "arobase": "@",
+    "plus": "+",
+    "moins": "-",
+    "égal": "=",
+    "inférieur": "<",
+    "supérieur": ">",
+    "crochet ouvrant": "[",
+    "crochet fermant": "]",
+    "accolade ouvrante": "{",
+    "accolade fermante": "}",
+    "entre parenthèses": "(",
+    "Entre parenthèses": "(",
+    "Fermez la parenthèse": ")",
+    "fermez la parenthèse": ")",
+    "nouvelle ligne": "\n",
+    "ouvrez la parenthèse" : "(",
+    "fermez la parenthèse" : ")",
+    "tiret du 6": "-",
+    "à la ligne:":"\n ",
+    "a la ligne:":"\n ",
+    "à la ligne":"\n ",
+    "à la ligne: .":"\n ",
+    "à la ligne:.":"\n ",
+    ". à la ligne:.":"\n ",
+    ".à la ligne:.":"\n ",
+    ".a la ligne:":"\n ",
+    ". a la ligne:":"\n ",
+    "points de suspension": "...",
+    "double point": "..",
+    "retour chariot": "\r\n",
+    "tabulation": "\t",
+    "espace insécable": " ",
+    "puce": "•",
+    "tiret cadratin": "—",
+    "tiret demi-cadratin": "–",
+    "plus ou moins": "±",
+    "multiplié": "×",
+    "divisé": "÷",
+    "degré": "°",
+    "micro": "µ",
+    "paragraphe": "§",
+    "copyright": "©️",
+    "guillemets anglais ouvrants": """,
+    "guillemets anglais fermants": """,
+    "guillemets simples ouvrants": "'",
+    "guillemets simples fermants": "'",
+    "flèche droite": "→",
+    "flèche gauche": "←",
+    "flèche haut": "↑",
+    "flèche bas": "↓",
+    "inférieur ou égal": "≤",
+    "supérieur ou égal": "≥",
+    "différent": "≠",
+    "environ": "≈",
+    "pour mille": "‰",
+    "exposant un": "¹",
+    "exposant deux": "²",
+    "exposant trois": "³",
+    "\n .":"\n ",
+    "\n.":"\n ",
+    ". \n":"\n ",
+    ".\n":"\n ",
+    ". \n .":"\n ",
+    ".\n .":"\n ",
+    ".\n.":"\n ",
+    "deux .":".",
+    "deux.":".",
+    ".s.": ".",
+    "s,": "",
+    "\n ..":"\n ",
+    ", ." : ".",
+    ", .,": ".",
+    ". . ." : ".",
+    ". , .": ".",
+    ". ." : ".",
+    ". ,": ".",
+    ", .": ".",
+    ", .,":".",
+    ",.":".",
+    ", .":".",
+    ", .,":".",
+    ". .":".",
+    ". . .":"...",
+    ".," : ".",
+    ".." : ".",
+    ", ,,": ",",
+
+
+
+
+
+
+
+
+}
+
+def remplacer_ponctuation(transcription: str) -> str:
+    """
+    Replace punctuation words with corresponding punctuation marks in a case-insensitive manner.
+
+    Args:
+        transcription: Input text containing punctuation words
+    Returns:
+        str: Text with punctuation words replaced by actual punctuation marks
+    """
+    # Convert input to lowercase for case-insensitive comparison
+    result = transcription
+    
+    # Create case-insensitive pattern replacements
+    for mot, signe in PUNCTUATION_MAP.items():
+        # Create patterns for different cases:
+        # 1. All lowercase
+        # 2. First letter capitalized
+        # 3. All uppercase
+        patterns = [
+            mot.lower(),
+            mot.capitalize(),
+            mot.upper()
+        ]
+        
+        # Apply each pattern
+        for pattern in patterns:
+            result = result.replace(pattern, signe)
+    
+    return result
+
+
+>>>>>>> 6a27bf113977cc1e1abd76bf5eedea341c3b77bb

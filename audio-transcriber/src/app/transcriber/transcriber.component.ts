@@ -317,11 +317,11 @@ export class TranscriberComponent implements OnInit {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('model', this.getSelectedModelValue());
-
+  
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
-
+  
     this.ngZone.run(() => {
       this.isTranscribing = true;
       this.transcription = null;
@@ -329,7 +329,7 @@ export class TranscriberComponent implements OnInit {
       this.selectedUploadId = null;
       this.audioStreamUrl = null;
     });
-
+  
     this.http.post<any>(`https://backend.shaz.ai/upload-audio/`, formData, { headers }).subscribe(
       response => {
         console.log('Réponse de transcription :', response);
@@ -347,6 +347,8 @@ export class TranscriberComponent implements OnInit {
           });
         });
         
+        // درخواست اضافی برای دریافت اطلاعات transcription و نقش کاربر
+        this.fetchTranscriptionInfo(response.upload_id);
         this.fetchHistory();
       },
       error => {
@@ -363,6 +365,24 @@ export class TranscriberComponent implements OnInit {
     );
   }
 
+  fetchTranscriptionInfo(upload_id: number): void {
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+  
+    this.http.get<any>(`https://backend.shaz.ai/get-transcription/${upload_id}`, { headers }).subscribe(
+      response => {
+        this.ngZone.run(() => {
+          this.selectedTranscription = response.transcription;
+          this.isEditor = response.is_editor; // تنظیم متغیر isEditor
+        });
+      },
+      error => {
+        console.error('Error fetching transcription:', error);
+        alert('Error fetching transcription');
+      }
+    );
+  }
 
   // Démarrer l'enregistrement audio
   startRecording(): void {
