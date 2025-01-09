@@ -321,6 +321,32 @@ async def upload_audio(
             logger.error(f"Error during transcription: {e}")
             raise HTTPException(status_code=500, detail=f"Error during transcription: {e}")
 
+        # بررسی اینکه آیا کاربر 'word' هست یا خیر
+        if user.username == 'word':
+            # حذف فایل‌های صوتی و ترانسکریپشن
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Deleted audio file for user 'word': {file_path}")
+                # اگر فایل ترانسکریپشن نیز ایجاد شده باشد، حذف کنید
+                transcription_filename = f"{unique_id}_transcription.txt"
+                transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
+                if os.path.exists(transcription_path):
+                    os.remove(transcription_path)
+                    logger.info(f"Deleted transcription file for user 'word': {transcription_path}")
+            except Exception as e:
+                logger.error(f"Error deleting files for user 'word': {e}")
+                raise HTTPException(status_code=500, detail="Failed to delete files for user 'word'.")
+
+            # بازگشت ترانسکریپشن بدون ذخیره در پایگاه داده
+            return JSONResponse(
+                content={
+                    "transcription": transcription.strip(),
+                    "model_used": selected_model  # Inform the user about the model used
+                }
+            )
+
+        # اگر کاربر 'word' نیست، ادامه عملیات به صورت معمولی
         # Generate transcription filename
         transcription_filename = f"{unique_id}_transcription.txt"
         transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
@@ -645,7 +671,6 @@ async def get_transcription(
     
     return {"transcription": transcription, "is_editor": is_editor}
 
-
 def remplacer_ponctuation(transcription: str) -> str:
    
     PUNCTUATION_MAP = {
@@ -750,6 +775,7 @@ def remplacer_ponctuation(transcription: str) -> str:
         ", ..": ",",
         ":.": ":",
         ",.": ".",
+        ", :": ":",
     }
     
    
@@ -972,8 +998,11 @@ async def get_users(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get list of all users except current user"""
-    users = db.query(User).filter(User.id != current_user.id).all()
+    """Get list of all users except current user and exclude user 'word'"""
+    users = db.query(User).filter(
+        User.id != current_user.id,
+        User.username != 'word'  # اضافه کردن شرط برای حذف کاربر 'word'
+    ).all()
     return {
         "users": [{"id": user.id, "username": user.username} for user in users]
     }
@@ -988,7 +1017,7 @@ async def share_with_user(
     """
     Share a record with a user specifying the type of access.
     """
-    # Check if the record belongs to the current user
+    # چک کردن اینکه آیا رکورد متعلق به کاربر جاری است
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
         Upload.owner_id == current_user.id
@@ -998,25 +1027,25 @@ async def share_with_user(
         logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
         raise HTTPException(status_code=404, detail="Record not found")
 
-    # Check if the target user exists
+    # چک کردن اینکه آیا کاربر هدف وجود دارد
     target_user = db.query(User).filter(User.id == share.user_id).first()
     if not target_user:
         logger.warning(f"Target user not found: {share.user_id}")
         raise HTTPException(status_code=404, detail="Target user not found")
     
-    # Validate access type
+    # اعتبارسنجی نوع دسترسی
     if share.access_type not in ['viewer', 'editor']:
         logger.warning(f"Invalid access type: {share.access_type}")
         raise HTTPException(status_code=400, detail="Invalid access type")
     
-    # Check if the share already exists
+    # چک کردن اینکه آیا اشتراک قبلاً وجود دارد
     existing_share = db.query(Share).filter(
         Share.upload_id == upload_id,
         Share.user_id == share.user_id
     ).first()
     
     if existing_share:
-        existing_share.access_type = share.access_type  # Update access type
+        existing_share.access_type = share.access_type  # بروزرسانی نوع دسترسی
         logger.info(f"Updated existing share for user {share.user_id} on upload {upload_id}")
     else:
         new_share = Share(
@@ -1047,7 +1076,7 @@ async def remove_share(
     """
     Remove the sharing of a record with a user.
     """
-    # Check if the record belongs to the current user
+    # چک کردن اینکه آیا رکورد متعلق به کاربر جاری است
     upload = db.query(Upload).filter(
         Upload.id == upload_id,
         Upload.owner_id == current_user.id
@@ -1057,7 +1086,7 @@ async def remove_share(
         logger.warning(f"Upload not found or not owned by user {current_user.username}: {upload_id}")
         raise HTTPException(status_code=404, detail="Record not found")
     
-    # Find the share
+    # یافتن اشتراک
     share = db.query(Share).filter(
         Share.upload_id == upload_id,
         Share.user_id == user_id
@@ -1077,7 +1106,3 @@ async def remove_share(
         raise HTTPException(status_code=500, detail="Failed to remove share")
     
     return {"message": "Share access removed successfully"}
-
-# Additional Optimizations and Helper Functions are already integrated above
-
-# If you have additional endpoints or functionalities, add them below as needed.

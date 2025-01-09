@@ -182,7 +182,7 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<{users: User[]}>(`https://backend.shaz.ai/users/`, { headers }).subscribe(
+    this.http.get<{users: User[]}>(`${environment.apiUrl}/users/`, { headers }).subscribe(
       response => {
         // Initialiser accessType pour chaque utilisateur
         this.users = response.users.map(user => ({
@@ -212,7 +212,7 @@ export class TranscriberComponent implements OnInit {
     };
 
     this.http.post<ShareResponse>(
-      `https://backend.shaz.ai/share/${this.selectedUploadForShare}/user/`,
+      `${environment.apiUrl}/share/${this.selectedUploadForShare}/user/`,
       payload,
       { headers }
     ).pipe(
@@ -250,7 +250,7 @@ export class TranscriberComponent implements OnInit {
     localStorage.setItem('theme', this.currentTheme);
   }
   private getAudioStreamUrl(uploadId: number): string {
-    return `https://backend.shaz.ai/stream-audio/${uploadId}`;
+    return `${environment.apiUrl}/stream-audio/${uploadId}`;
   }
   // Gérer la sélection de fichier
   onFileSelected(event: any): void {
@@ -291,13 +291,13 @@ export class TranscriberComponent implements OnInit {
     this.transcription = null;
 
     // Set new audio stream URL
-    this.audioStreamUrl = `https://backend.shaz.ai/stream-audio/${upload_id}`;
+    this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${upload_id}`;
 
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.get<any>(`https://backend.shaz.ai/get-transcription/${upload_id}`, { headers }).subscribe(
+    this.http.get<any>(`${environment.apiUrl}/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
@@ -330,7 +330,7 @@ export class TranscriberComponent implements OnInit {
       this.audioStreamUrl = null;
     });
   
-    this.http.post<any>(`https://backend.shaz.ai/upload-audio/`, formData, { headers }).subscribe(
+    this.http.post<any>(`${environment.apiUrl}/upload-audio/`, formData, { headers }).subscribe(
       response => {
         console.log('Réponse de transcription :', response);
         this.ngZone.run(() => {
@@ -339,7 +339,7 @@ export class TranscriberComponent implements OnInit {
           this.isTranscribing = false;
           this.selectedUploadId = response.upload_id;
           this.selectedUploadForShare = response.upload_id;
-          this.audioStreamUrl = `https://backend.shaz.ai/stream-audio/${response.upload_id}`;
+          this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
           
           // Auto-share with all configured users
           this.autoShareConfigs.forEach(config => {
@@ -370,7 +370,7 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
   
-    this.http.get<any>(`https://backend.shaz.ai/get-transcription/${upload_id}`, { headers }).subscribe(
+    this.http.get<any>(`${environment.apiUrl}/get-transcription/${upload_id}`, { headers }).subscribe(
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
@@ -480,7 +480,7 @@ export class TranscriberComponent implements OnInit {
         'Authorization': `Bearer ${this.token}`
       });
 
-      this.http.delete(`https://backend.shaz.ai/history/${upload_id}`, { headers }).subscribe(
+      this.http.delete(`${environment.apiUrl}/history/${upload_id}`, { headers }).subscribe(
         () => {
           this.fetchHistory();
           if (this.selectedUploadId === upload_id) {
@@ -513,7 +513,7 @@ export class TranscriberComponent implements OnInit {
       'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.put(`https://backend.shaz.ai/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
+    this.http.put(`${environment.apiUrl}/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
         // Update both transcription sources
         if (this.transcription) {
@@ -573,7 +573,7 @@ export class TranscriberComponent implements OnInit {
         'Authorization': `Bearer ${this.token}`
     });
 
-    const url = `https://backend.shaz.ai/download-transcription/${upload_id}`;
+    const url = `${environment.apiUrl}/download-transcription/${upload_id}`;
     this.http.get(url, { 
         headers, 
         responseType: 'blob',
@@ -607,7 +607,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
   });
 
-  const url = `https://backend.shaz.ai/download-audio/${upload_id}`;
+  const url = `${environment.apiUrl}/download-audio/${upload_id}`;
   this.http.get(url, { 
       headers, 
       responseType: 'blob',
@@ -674,7 +674,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
   
-    this.http.post(`https://backend.shaz.ai/toggle-archive/${upload_id}`, {}, { headers })
+    this.http.post(`${environment.apiUrl}/toggle-archive/${upload_id}`, {}, { headers })
       .pipe(
         catchError(error => {
           console.error('Error toggling archive status:', error);
@@ -701,7 +701,7 @@ downloadAudioFile(upload_id: number): void {
       'Authorization': `Bearer ${this.token}`
     });
 
-    let url = `https://backend.shaz.ai/history/`;
+    let url = `${environment.apiUrl}/history/`;
     if (this.showArchived) {
       url += '?include_archived=true';
     }
@@ -747,7 +747,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
     });
 
-    this.http.delete(`https://backend.shaz.ai/share/${uploadId}/user/${userId}`, { headers })
+    this.http.delete(`${environment.apiUrl}/share/${uploadId}/user/${userId}`, { headers })
         .pipe(
             catchError(error => {
                 console.error('Error removing share:', error);
@@ -765,7 +765,7 @@ downloadAudioFile(upload_id: number): void {
         'Authorization': `Bearer ${this.token}`
       });
   
-      this.http.get<any>(`https://backend.shaz.ai/current-user/`, { headers }).subscribe(
+      this.http.get<any>(`${environment.apiUrl}/current-user/`, { headers }).subscribe(
         response => {
           this.currentUserId = response.id;
         },

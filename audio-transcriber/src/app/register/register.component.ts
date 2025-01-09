@@ -46,7 +46,7 @@ export class RegisterComponent implements OnInit {
       referralCode: this.referralCode // Envoi du code de parrainage au serveur (optionnel)
     };
 
-    this.http.post<any>(`https://backend.shaz.ai/register/`, registerData).subscribe(
+    this.http.post<any>(`${environment.apiUrl}/register/`, registerData).subscribe(
       (response) => {
         this.successMessage = 'Inscription réussie. Vous pouvez maintenant vous connecter.';
         this.errorMessage = '';
