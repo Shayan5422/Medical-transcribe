@@ -99,7 +99,14 @@ export class TranscriberComponent implements OnInit {
     { id: 'fast', name: 'Rapide', value: 'openai/whisper-large-v3-turbo' },
     { id: 'accurate', name: 'Précis', value: 'openai/whisper-large-v3' }
   ];
-  
+  private streamChunks: { blob: Blob, text: string }[] = [];
+  private chunkInterval: number = 30000; // 30 seconds in milliseconds
+  private recordingStartTime: number = 0;
+  private chunkTimer: any;
+  private isProcessingChunk: boolean = false;
+  private recordingBuffer: Blob[] = [];
+  private currentMediaRecorder: MediaRecorder | null = null;
+  private processingQueue: Promise<void> = Promise.resolve();
 
   // Add this helper method
   getSelectedModelValue(): string {
@@ -285,7 +292,6 @@ export class TranscriberComponent implements OnInit {
   // Télécharger le fichier audio vers le serveur
   // Dans la méthode selectUpload
   selectUpload(upload_id: number): void {
-    // Reset audio stream URL first
     this.audioStreamUrl = null;
     this.selectedUploadId = upload_id;
     this.transcription = null;
@@ -301,7 +307,9 @@ export class TranscriberComponent implements OnInit {
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
-          this.isEditor = response.is_editor; // Mettre à jour le rôle
+          this.isEditor = response.is_editor;
+          // Update UI state
+          this.updateUIAfterTranscriptionFetch();
         });
       },
       error => {
@@ -309,6 +317,17 @@ export class TranscriberComponent implements OnInit {
         alert('Error fetching transcription');
       }
     );
+  }
+
+  private updateUIAfterTranscriptionFetch(): void {
+    // Update audio player
+    if (this.selectedUploadId) {
+      this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${this.selectedUploadId}`;
+    }
+    
+    // Reset editing state
+    this.isEditing = false;
+    this.editedTranscription = '';
   }
 
 
@@ -386,73 +405,230 @@ export class TranscriberComponent implements OnInit {
 
   // Démarrer l'enregistrement audio
   startRecording(): void {
+    this.streamChunks = [];
+    this.transcription = '';
+    
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(stream => {
-          this.mediaStream = stream; // Stocker le flux média
-          let mimeType = 'audio/webm';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'audio/ogg';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-              mimeType = '';
-            }
-          }
-
-          const options: MediaRecorderOptions = {};
-          if (mimeType) {
-            options.mimeType = mimeType;
-          }
+          this.mediaStream = stream;
+          const options: MediaRecorderOptions = {
+            mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
+          };
 
           this.mediaRecorder = new MediaRecorder(stream, options);
           this.audioChunks = [];
+          this.streamChunks = [];
+          this.recordingStartTime = Date.now();
+
+          // Start recording
           this.mediaRecorder.start();
           this.isRecording = true;
-          console.log('Enregistrement démarré.');
+          console.log('Recording started.');
+
+          // Set up chunk timer
+          this.setupChunkProcessing();
 
           this.mediaRecorder.ondataavailable = event => {
             if (event.data.size > 0) {
               this.audioChunks.push(event.data);
-              console.log('Données disponibles :', event.data);
+              console.log('Data available:', event.data);
             }
           };
 
-          this.mediaRecorder.onstop = () => {
-            const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
-            console.log('Type MIME du MediaRecorder :', mimeType);
-            const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-            const audioFile = new File([audioBlob], 'enregistrement.webm', { type: mimeType });
-            console.log('Fichier audio enregistré :', audioFile);
+          this.mediaRecorder.onstop = async () => {
+            // Clear chunk timer
+            if (this.chunkTimer) {
+              clearInterval(this.chunkTimer);
+            }
 
-            // Utiliser NgZone pour s'assurer que les changements sont détectés
+            // Wait for any pending chunk processing to complete
+            await this.processFinalChunk();
+
+            // Combine all transcriptions
+            const finalTranscription = this.combineTranscriptions();
+            
+            // Update UI with final transcription
             this.ngZone.run(() => {
-              this.uploadAudio(audioFile);
+              this.transcription = finalTranscription;
+              this.isRecording = false;
             });
+
+            // Clean up
+            if (this.mediaStream) {
+              this.mediaStream.getTracks().forEach(track => track.stop());
+              this.mediaStream = null;
+            }
           };
         })
         .catch(err => {
-          console.error('Erreur lors de l\'accès au microphone :', err);
-          alert('Impossible d\'accéder au microphone.');
+          console.error('Error accessing microphone:', err);
+          alert('Unable to access microphone.');
         });
     } else {
-      alert('Votre navigateur ne prend pas en charge l\'enregistrement audio.');
+      alert('Your browser does not support audio recording.');
     }
   }
 
-  // Arrêter l'enregistrement audio
+  private setupChunkProcessing(): void {
+    this.chunkTimer = setInterval(() => {
+      if (this.mediaRecorder && this.mediaRecorder.state === 'recording' && !this.isProcessingChunk) {
+        this.processCurrentChunk();
+      }
+    }, this.chunkInterval);
+  }
+
+  private async processCurrentChunk(): Promise<void> {
+    if (!this.mediaRecorder || this.isProcessingChunk || this.audioChunks.length === 0) return;
+
+    this.isProcessingChunk = true;
+    
+    try {
+      // Create a new MediaRecorder for the next chunk while processing the current one
+      const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options: MediaRecorderOptions = {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
+      };
+      
+      // Set up new recorder
+      const newRecorder = new MediaRecorder(newStream, options);
+      newRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.recordingBuffer.push(event.data);
+        }
+      };
+      
+      // Start new recorder
+      newRecorder.start();
+      
+      // Create blob from current chunks
+      const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder.mimeType });
+      
+      // Clear chunks array for next recording segment
+      this.audioChunks = [];
+      
+      // Stop current recorder and clean up
+      const oldRecorder = this.mediaRecorder;
+      const oldStream = this.mediaStream;
+      
+      // Switch to new recorder
+      this.mediaRecorder = newRecorder;
+      this.mediaStream = newStream;
+      
+      // Stop old recorder and stream
+      if (oldRecorder && oldRecorder.state === 'recording') {
+        oldRecorder.stop();
+      }
+      if (oldStream) {
+        oldStream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Add to processing queue
+      this.processingQueue = this.processingQueue
+        .then(() => this.uploadChunk(audioBlob))
+        .catch(error => {
+          console.error('Error processing chunk:', error);
+        });
+        
+      await this.processingQueue;
+      
+    } catch (error) {
+      console.error('Error during chunk processing:', error);
+    } finally {
+      this.isProcessingChunk = false;
+    }
+  }
+
+  private async processFinalChunk(): Promise<void> {
+    if (this.audioChunks.length > 0) {
+      const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+      await this.uploadChunk(audioBlob);
+      
+      // After final chunk is processed, update UI and fetch history
+      this.ngZone.run(() => {
+        this.fetchHistory();
+        if (this.selectedUploadId) {
+          this.selectUpload(this.selectedUploadId);
+        }
+      });
+    }
+  }
+
+  private async uploadChunk(audioBlob: Blob): Promise<void> {
+    if (audioBlob.size === 0) return;
+    
+    const formData = new FormData();
+    const fileName = `chunk_${Date.now()}.webm`;
+    const audioFile = new File([audioBlob], fileName, { type: audioBlob.type });
+    
+    formData.append('file', audioFile);
+    formData.append('model', this.getSelectedModelValue());
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    try {
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/upload-audio/`,
+        formData,
+        { headers }
+      ).toPromise();
+
+      this.streamChunks.push({
+        blob: audioBlob,
+        text: response.transcription
+      });
+
+      // Update UI with intermediate results
+      this.ngZone.run(() => {
+        this.transcription = this.combineTranscriptions();
+        this.selectedUploadId = response.upload_id;
+        this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
+        
+        // Auto-share with configured users
+        this.autoShareConfigs.forEach(config => {
+          this.shareWithUser(config.userId, config.accessType);
+        });
+        
+        // Update history and fetch latest transcription
+        this.fetchHistory();
+        if (this.selectedUploadId) {
+          this.fetchTranscriptionInfo(this.selectedUploadId);
+        }
+      });
+    } catch (error) {
+      console.error('Error processing audio chunk:', error);
+    }
+  }
+
+  private combineTranscriptions(): string {
+    return this.streamChunks
+      .map(chunk => chunk.text)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   stopRecording(): void {
-    if (this.mediaRecorder) {
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       this.mediaRecorder.stop();
       this.isRecording = false;
-      console.log('Enregistrement arrêté.');
+      console.log('Recording stopped.');
     }
 
-    // Arrêter tous les tracks du flux média pour libérer le microphone
+    if (this.chunkTimer) {
+      clearInterval(this.chunkTimer);
+    }
+
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop());
       this.mediaStream = null;
-      console.log('Flux média arrêté pour libérer le microphone.');
     }
   }
+
+
+
 
   // Télécharger la transcription en tant que fichier texte
   downloadTranscription(): void {
@@ -515,7 +691,6 @@ export class TranscriberComponent implements OnInit {
 
     this.http.put(`${environment.apiUrl}/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
-        // Update both transcription sources
         if (this.transcription) {
           this.transcription = this.editedTranscription;
         }
@@ -570,96 +745,83 @@ export class TranscriberComponent implements OnInit {
 
   downloadTranscriptionFile(upload_id: number): void {
     const headers = new HttpHeaders({
-        'Authorization': `Bearer ${this.token}`
+      'Authorization': `Bearer ${this.token}`
     });
 
     const url = `${environment.apiUrl}/download-transcription/${upload_id}`;
     this.http.get(url, { 
-        headers, 
-        responseType: 'blob',
-        observe: 'response' 
+      headers, 
+      responseType: 'blob',
+      observe: 'response' 
     }).subscribe(
-        response => {
-            const blob = new Blob([response.body!], { type: 'text/plain' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Patient_${upload_id}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        },
-        error => {
-            console.error('Error downloading transcription file:', error);
-            if (error.status === 404) {
-                alert('Fichier de transcription non trouvé ou accès refusé');
-            } else {
-                alert('Erreur lors du téléchargement du fichier de transcription');
-            }
+      response => {
+        const blob = new Blob([response.body!], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Patient_${upload_id}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      },
+      error => {
+        console.error('Error downloading transcription file:', error);
+        if (error.status === 404) {
+          alert('Fichier de transcription non trouvé ou accès refusé');
+        } else {
+          alert('Erreur lors du téléchargement du fichier de transcription');
         }
+      }
     );
-}
+  }
 
 
-downloadAudioFile(upload_id: number): void {
-  const headers = new HttpHeaders({
+  downloadAudioFile(upload_id: number): void {
+    const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
-  });
+    });
 
-  const url = `${environment.apiUrl}/download-audio/${upload_id}`;
-  this.http.get(url, { 
+    const url = `${environment.apiUrl}/download-audio/${upload_id}`;
+    this.http.get(url, { 
       headers, 
       responseType: 'blob',
       observe: 'response'
-  }).subscribe(
+    }).subscribe(
       response => {
-          const blob = new Blob([response.body!], { type: 'audio/wav' });
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `Patient_${upload_id}.wav`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
+        const blob = new Blob([response.body!], { type: 'audio/wav' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Patient_${upload_id}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
       },
       error => {
-          console.error('Error downloading audio file:', error);
-          if (error.status === 404) {
-              alert('Fichier audio non trouvé ou accès refusé');
-          } else {
-              alert('Erreur lors du téléchargement du fichier audio');
-          }
+        console.error('Error downloading audio file:', error);
+        if (error.status === 404) {
+          alert('Fichier audio non trouvé ou accès refusé');
+        } else {
+          alert('Erreur lors du téléchargement du fichier audio');
+        }
       }
-  );
-}
+    );
+  }
 
   // دانلود ترنسکریپشن به صورت PDF با نام بیمار
   downloadTranscriptionAsPDF(upload_id: number): void {
-    // Utiliser la transcription sélectionnée ou la transcription immédiate
     const transcriptionText = this.selectedTranscription || this.transcription;
-  
-    console.log('downloadTranscriptionAsPDF appelé avec upload_id:', upload_id);
-    console.log('Texte de transcription:', transcriptionText);
   
     if (transcriptionText) {
       try {
         const doc = new jsPDF();
-  
-        // Définir la police et la taille
         doc.setFont('Helvetica');
         doc.setFontSize(12);
-  
-        // Diviser le texte en lignes adaptées à la page
-        const lines = doc.splitTextToSize(transcriptionText, 180); // Ajustez la largeur si nécessaire
-  
-        // Ajouter le texte au PDF
+        const lines = doc.splitTextToSize(transcriptionText, 180);
         doc.text(lines, 10, 10);
-  
-        // Sauvegarder le PDF avec le nom du patient
         doc.save(`Patient_${upload_id}.pdf`);
-        console.log(`Transcription téléchargée en tant que PDF : Patient_${upload_id}.pdf`);
       } catch (error) {
         console.error('Erreur lors de la création du PDF:', error);
         alert('Erreur lors de la création du fichier PDF.');

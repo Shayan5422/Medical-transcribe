@@ -1,6 +1,6 @@
 <!-- src/app/transcriber/transcriber.component.html -->
 
-<div class="min-h-screen bg-base-200">
+<div class="min-h-screen bg-base-200 overflow-hidden">
   <!-- Mobile hamburger button -->
   <button
     class="md:hidden fixed top-4 left-4 z-50 p-2 bg-base-100 rounded-lg shadow-lg"
@@ -228,31 +228,42 @@
     </div>
 
     <!-- Main content -->
-    <main class="flex-1 p-4 md:p-8 space-y-8 w-full">
+    <main class="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 w-full">
       
 
         <!-- Add this button in the main toolbar or wherever appropriate -->
         <!-- Replace the existing auto-share button with this updated version -->
-<div class="mb-4">
-  <button 
-    class="btn btn-outline btn-sm"
-    (click)="openAutoShareModal()">
-    <div class="flex items-center gap-2">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
-        <polyline points="16 6 12 2 8 6"></polyline>
-        <line x1="12" y1="2" x2="12" y2="15"></line>
-      </svg>
-      {{ autoShareConfigs.length > 0 ? 'Modifier Auto-partages' : 'Configurer Auto-partages' }}
-    </div>
-  </button>
+        <div class="mb-4">
+          <div class="flex items-center">
+            <!-- Texte centré -->
+            
+            <!-- Bouton Auto-partage à droite -->
+            <button 
+              class="btn btn-outline btn-sm"
+              (click)="openAutoShareModal()">
+              <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" 
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor" 
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                  <polyline points="16 6 12 2 8 6"></polyline>
+                  <line x1="12" y1="2" x2="12" y2="15"></line>
+                </svg>
+                {{ autoShareConfigs.length > 0 ? 'Modifier Auto-partages' : 'Configurer Auto-partages' }}
+              </div>
+            </button>
+            <div class="flex-1 text-center text-base-content/20 italic">
+              La clarté de votre voix optimise la précision de la transcription
+            </div>
+          </div>
 
   <!-- Display active auto-share configurations -->
   <div *ngIf="autoShareConfigs.length > 0" class="mt-2 text-sm text-base-content/70">
     <div>Auto-partages actifs:</div>
     <ul class="list-disc ml-4">
       <li *ngFor="let config of autoShareConfigs">
-        {{ config.username }} ({{ config.accessType === 'editor' ? 'Éditeur' : 'Lecteur' }})
+        {{ config.username }} 
+        ({{ config.accessType === 'editor' ? 'Éditeur' : 'Lecteur' }})
       </li>
     </ul>
   </div>
@@ -313,11 +324,11 @@
     </div>
   </div>
 </div>
-
-      <app-pricing></app-pricing>
-      <div class="md:col-span-2 text-center text-base-content/20 italic">
-        La clarté de votre voix optimise la précision de la transcription
-      </div>
+<!-- <div class="md:col-span-2 text-center text-base-content/20 italic">
+  La clarté de votre voix optimise la précision de la transcription
+</div> -->
+      <!-- <app-pricing></app-pricing> -->
+      
       <!-- Section combinée pour upload et enregistrement -->
       <div class="card bg-base-100 shadow-md p-6">
         <!-- Add this near the top of your main content, just below the mobile hamburger button -->
@@ -452,7 +463,12 @@
           <span>Veuillez patienter, la transcription est en cours...</span>
         </div>
       </div>
-
+      <!-- <div *ngIf="isRecording" class="realtime-transcription">
+        <p>Transcription en temps réel:</p>
+        <div class="transcription-text">
+          {{ selectedTranscription }}
+        </div>
+      </div> -->
       <!-- Affichage de la transcription -->
       <div class="card bg-base-100 shadow-md p-6" *ngIf="transcription || selectedTranscription">
         <div class="flex justify-between items-center mb-4">
