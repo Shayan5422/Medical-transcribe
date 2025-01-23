@@ -387,6 +387,121 @@ async def upload_audio(
             }
         )
 
+@app.post("/process-chunk/")
+async def process_chunk(
+    user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
+    chunk_number: int = Form(...),
+    session_id: str = Form(...),
+    is_final: bool = Form(False),
+    model: str = Form("openai/whisper-large-v3-turbo"),
+    db: Session = Depends(get_db),
+):
+    """Process a single chunk of audio and return its transcription."""
+    logger.info(f"Processing chunk {chunk_number} for session {session_id}")
+    
+    # Create session directory if it doesn't exist
+    session_dir = os.path.join(AUDIO_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    
+    # Save chunk
+    chunk_filename = f"chunk_{chunk_number}.wav"
+    chunk_path = os.path.join(session_dir, chunk_filename)
+    
+    try:
+        async with aiofiles.open(chunk_path, "wb") as out_file:
+            content = await file.read()
+            await out_file.write(content)
+        logger.info(f"Chunk saved to {chunk_path}")
+        
+        # Process transcription
+        asr_pipeline = get_asr_pipeline(model)
+        transcription = await asyncio.get_event_loop().run_in_executor(
+            executor, process_transcription, chunk_path, asr_pipeline
+        )
+        
+        # Save transcription
+        trans_filename = f"chunk_{chunk_number}_trans.txt"
+        trans_path = os.path.join(session_dir, trans_filename)
+        async with aiofiles.open(trans_path, "w", encoding="utf-8") as f:
+            await f.write(transcription.strip())
+            
+        if is_final:
+            # Combine all chunks
+            combined_audio = AudioSegment.empty()
+            combined_trans = []
+            chunk_num = 0
+            while True:
+                wav_path = os.path.join(session_dir, f"chunk_{chunk_num}.wav")
+                trans_path = os.path.join(session_dir, f"chunk_{chunk_num}_trans.txt")
+                if not os.path.exists(wav_path):
+                    break
+                    
+                # Combine audio
+                chunk_audio = AudioSegment.from_wav(wav_path)
+                combined_audio += chunk_audio
+                
+                # Combine transcription
+                async with aiofiles.open(trans_path, "r", encoding="utf-8") as f:
+                    chunk_trans = await f.read()
+                    combined_trans.append(chunk_trans.strip())
+                
+                chunk_num += 1
+            
+            # Save final files
+            final_audio_path = os.path.join(AUDIO_DIR, f"{session_id}.wav")
+            combined_audio.export(final_audio_path, format="wav")
+            
+            final_trans = " ".join(combined_trans)
+            final_trans_path = os.path.join(AUDIO_DIR, f"{session_id}_transcription.txt")
+            async with aiofiles.open(final_trans_path, "w", encoding="utf-8") as f:
+                await f.write(final_trans)
+            
+            # Create upload record
+            if user.username != 'word':
+                upload_record = Upload(
+                    filename=f"{session_id}.wav",
+                    transcription_filename=f"{session_id}_transcription.txt",
+                    owner=user,
+                )
+                db.add(upload_record)
+                try:
+                    db.commit()
+                    db.refresh(upload_record)
+                    logger.info(f"Upload record created with id: {upload_record.id}")
+                except Exception as e:
+                    logger.error(f"Database commit failed: {e}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to save the upload record in the database."
+                    )
+                
+                return JSONResponse(
+                    content={
+                        "transcription": final_trans,
+                        "upload_id": upload_record.id,
+                        "model_used": model
+                    }
+                )
+            else:
+                return JSONResponse(
+                    content={
+                        "transcription": final_trans,
+                        "model_used": model
+                    }
+                )
+        
+        return JSONResponse(
+            content={
+                "chunk_transcription": transcription.strip(),
+                "chunk_number": chunk_number
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing chunk: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing chunk: {e}")
+
 def diviser_audio(audio: np.ndarray, samplerate: int = 16000, duree_max: int = 29, overlap_duration: int = 1) -> List[np.ndarray]:
     """
     Divides audio into segments with a maximum duration and specified overlap.

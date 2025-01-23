@@ -99,6 +99,11 @@ export class TranscriberComponent implements OnInit {
     { id: 'fast', name: 'Rapide', value: 'openai/whisper-large-v3-turbo' },
     { id: 'accurate', name: 'Précis', value: 'openai/whisper-large-v3' }
   ];
+  private recordingStartTime: number = 0;
+  private chunkInterval: any;
+  private currentChunkNumber: number = 0;
+  private sessionId: string = '';
+  private tempTranscriptions: string[] = [];
   
 
   // Add this helper method
@@ -384,73 +389,274 @@ export class TranscriberComponent implements OnInit {
     );
   }
 
-  // Démarrer l'enregistrement audio
+  // Start recording with chunk processing
   startRecording(): void {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
+      navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          sampleSize: 16,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      })
         .then(stream => {
-          this.mediaStream = stream; // Stocker le flux média
-          let mimeType = 'audio/webm';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'audio/ogg';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-              mimeType = '';
+          this.mediaStream = stream;
+          
+          // Find supported MIME type
+          const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/ogg'
+          ];
+          
+          let selectedMimeType = '';
+          for (const type of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(type)) {
+              selectedMimeType = type;
+              break;
             }
           }
-
-          const options: MediaRecorderOptions = {};
-          if (mimeType) {
-            options.mimeType = mimeType;
+          
+          if (!selectedMimeType) {
+            throw new Error('No supported MIME type found for audio recording');
           }
+
+          console.log('Using MIME type:', selectedMimeType);
+          const options: MediaRecorderOptions = {
+            mimeType: selectedMimeType,
+            audioBitsPerSecond: 256000
+          };
 
           this.mediaRecorder = new MediaRecorder(stream, options);
           this.audioChunks = [];
-          this.mediaRecorder.start();
-          this.isRecording = true;
-          console.log('Enregistrement démarré.');
-
-          this.mediaRecorder.ondataavailable = event => {
-            if (event.data.size > 0) {
+          this.tempTranscriptions = [];
+          this.currentChunkNumber = 0;
+          this.sessionId = Date.now().toString();
+          this.recordingStartTime = Date.now();
+          
+          // Configure data collection
+          this.mediaRecorder.ondataavailable = async event => {
+            if (event.data && event.data.size > 0) {
+              console.log(`Received audio data: ${event.data.size} bytes, type: ${event.data.type}`);
               this.audioChunks.push(event.data);
-              console.log('Données disponibles :', event.data);
             }
           };
 
-          this.mediaRecorder.onstop = () => {
-            const mimeType = this.mediaRecorder?.mimeType || 'audio/webm';
-            console.log('Type MIME du MediaRecorder :', mimeType);
-            const audioBlob = new Blob(this.audioChunks, { type: mimeType });
-            const audioFile = new File([audioBlob], 'enregistrement.webm', { type: mimeType });
-            console.log('Fichier audio enregistré :', audioFile);
-
-            // Utiliser NgZone pour s'assurer que les changements sont détectés
-            this.ngZone.run(() => {
-              this.uploadAudio(audioFile);
-            });
+          this.mediaRecorder.onstop = async () => {
+            console.log('MediaRecorder stopped, processing chunk...');
+            if (this.audioChunks.length > 0) {
+              try {
+                // Convert to WAV
+                const audioContext = new AudioContext({
+                  sampleRate: 16000,
+                });
+                
+                const blob = new Blob(this.audioChunks, { type: selectedMimeType });
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                // Create WAV file
+                const wavBlob = await this.audioBufferToWav(audioBuffer);
+                
+                // Process the WAV chunk
+                await this.processCurrentChunk(false, wavBlob);
+                
+                audioContext.close();
+                
+                if (this.isRecording) {
+                  console.log('Starting next chunk...');
+                  this.audioChunks = [];
+                  this.mediaRecorder?.start(1000);
+                }
+              } catch (error) {
+                console.error('Error processing audio chunk:', error);
+                if (this.isRecording) {
+                  this.audioChunks = [];
+                  this.mediaRecorder?.start(1000);
+                }
+              }
+            } else {
+              console.log('No audio data to process');
+              if (this.isRecording) {
+                this.mediaRecorder?.start(1000);
+              }
+            }
           };
+
+          // Start recording with timeslice to get data frequently
+          this.mediaRecorder.start(1000);
+          this.isRecording = true;
+          console.log('Recording started with timeslice of 1 second');
+
+          // Process chunks every 30 seconds
+          this.chunkInterval = setInterval(() => {
+            if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+              console.log('Stopping recorder for chunk processing...');
+              this.mediaRecorder.stop();
+            }
+          }, 30000);
         })
         .catch(err => {
-          console.error('Erreur lors de l\'accès au microphone :', err);
-          alert('Impossible d\'accéder au microphone.');
+          console.error('Error accessing microphone:', err);
+          alert('Unable to access microphone.');
         });
     } else {
-      alert('Votre navigateur ne prend pas en charge l\'enregistrement audio.');
+      alert('Your browser does not support audio recording.');
     }
   }
 
-  // Arrêter l'enregistrement audio
-  stopRecording(): void {
-    if (this.mediaRecorder) {
-      this.mediaRecorder.stop();
-      this.isRecording = false;
-      console.log('Enregistrement arrêté.');
+  // Convert AudioBuffer to WAV Blob
+  private audioBufferToWav(buffer: AudioBuffer): Promise<Blob> {
+    const numberOfChannels = 1;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numberOfChannels * bytesPerSample;
+    
+    const wav = new ArrayBuffer(44 + buffer.length * bytesPerSample);
+    const view = new DataView(wav);
+    
+    // Write WAV header
+    const writeString = (view: DataView, offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(view, 0, 'RIFF');  // ChunkID
+    view.setUint32(4, 36 + buffer.length * bytesPerSample, true);  // ChunkSize
+    writeString(view, 8, 'WAVE');  // Format
+    writeString(view, 12, 'fmt ');  // Subchunk1ID
+    view.setUint32(16, 16, true);  // Subchunk1Size
+    view.setUint16(20, format, true);  // AudioFormat
+    view.setUint16(22, numberOfChannels, true);  // NumChannels
+    view.setUint32(24, sampleRate, true);  // SampleRate
+    view.setUint32(28, sampleRate * blockAlign, true);  // ByteRate
+    view.setUint16(32, blockAlign, true);  // BlockAlign
+    view.setUint16(34, bitDepth, true);  // BitsPerSample
+    writeString(view, 36, 'data');  // Subchunk2ID
+    view.setUint32(40, buffer.length * bytesPerSample, true);  // Subchunk2Size
+    
+    // Write audio data
+    const offset = 44;
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const sample = Math.max(-1, Math.min(1, data[i]));
+      view.setInt16(offset + i * bytesPerSample, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    }
+    
+    return Promise.resolve(new Blob([wav], { type: 'audio/wav' }));
+  }
+
+  // Process current audio chunk
+  private async processCurrentChunk(isFinal: boolean, wavBlob?: Blob): Promise<void> {
+    console.log(`Processing chunk ${this.currentChunkNumber}, isFinal: ${isFinal}`);
+    
+    if (!wavBlob && this.audioChunks.length === 0) {
+      console.log('No audio chunks to process');
+      return;
     }
 
-    // Arrêter tous les tracks du flux média pour libérer le microphone
+    const audioBlob = wavBlob || await this.convertToWav();
+    console.log(`Created WAV blob of size: ${audioBlob.size} bytes`);
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, `chunk_${this.currentChunkNumber}.wav`);
+    formData.append('chunk_number', this.currentChunkNumber.toString());
+    formData.append('session_id', this.sessionId);
+    formData.append('is_final', isFinal.toString());
+    formData.append('model', this.getSelectedModelValue());
+
+    try {
+      console.log(`Sending chunk ${this.currentChunkNumber} to server...`);
+      const headers = new HttpHeaders({
+        'Authorization': `Bearer ${this.token}`
+      });
+
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/process-chunk/`,
+        formData,
+        { headers }
+      ).toPromise();
+
+      console.log(`Server response for chunk ${this.currentChunkNumber}:`, response);
+
+      if (isFinal) {
+        this.ngZone.run(() => {
+          this.transcription = response.transcription;
+          this.isTranscribing = false;
+          if (response.upload_id) {
+            this.selectedUploadId = response.upload_id;
+            this.selectedUploadForShare = response.upload_id;
+            this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
+            
+            // Auto-share with configured users
+            this.autoShareConfigs.forEach(config => {
+              this.shareWithUser(config.userId, config.accessType);
+            });
+          }
+          this.fetchHistory();
+        });
+      } else {
+        this.tempTranscriptions[this.currentChunkNumber] = response.chunk_transcription;
+        this.currentChunkNumber++;
+        
+        // Update the displayed transcription with all chunks so far
+        this.ngZone.run(() => {
+          this.transcription = this.tempTranscriptions.join(' ');
+        });
+      }
+    } catch (error: any) {
+      console.error('Error processing chunk:', error);
+      this.ngZone.run(() => {
+        if (error.error?.detail) {
+          alert(`Error: ${error.error.detail}`);
+        } else {
+          alert('Error processing audio chunk.');
+        }
+        this.isTranscribing = false;
+      });
+    }
+  }
+
+  private async convertToWav(): Promise<Blob> {
+    const audioContext = new AudioContext({
+      sampleRate: 16000,
+    });
+    
+    const blob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType });
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const wavBlob = await this.audioBufferToWav(audioBuffer);
+    audioContext.close();
+    
+    return wavBlob;
+  }
+
+  stopRecording(): void {
+    console.log('Stopping recording...');
+    if (this.mediaRecorder) {
+      clearInterval(this.chunkInterval);
+      
+      if (this.mediaRecorder.state === 'recording') {
+        this.mediaRecorder.stop();
+        console.log('Processing final chunk...');
+        this.processCurrentChunk(true);
+      }
+      
+      this.isRecording = false;
+    }
+
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop());
       this.mediaStream = null;
-      console.log('Flux média arrêté pour libérer le microphone.');
+      console.log('Media stream stopped to release microphone.');
     }
   }
 
@@ -859,6 +1065,7 @@ downloadAudioFile(upload_id: number): void {
   }
   
   
+
 
 
 
