@@ -99,14 +99,225 @@ export class TranscriberComponent implements OnInit {
     { id: 'fast', name: 'Rapide', value: 'openai/whisper-large-v3-turbo' },
     { id: 'accurate', name: 'Précis', value: 'openai/whisper-large-v3' }
   ];
-  private streamChunks: { blob: Blob, text: string }[] = [];
-  private chunkInterval: number = 30000; // 30 seconds in milliseconds
-  private recordingStartTime: number = 0;
+  
+
+  // Add new properties
+  private readonly CHUNK_DURATION = 30000; // 30 seconds in milliseconds
   private chunkTimer: any;
-  private isProcessingChunk: boolean = false;
-  private recordingBuffer: Blob[] = [];
-  private currentMediaRecorder: MediaRecorder | null = null;
-  private processingQueue: Promise<void> = Promise.resolve();
+  private temporaryTranscriptions: string[] = [];
+  private recordingStartTime: number = 0;
+  private audioContext: AudioContext | null = null;
+  private mediaStreamSource: MediaStreamAudioSourceNode | null = null;
+  private processor: ScriptProcessorNode | null = null;
+  private readonly DEFAULT_SAMPLE_RATE = 48000; // Default sample rate if AudioContext is not available
+  private chunks: Float32Array[] = [];
+
+  // Modify startRecording method
+  async startRecording(): Promise<void> {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        this.mediaStream = stream;
+        
+        // Initialize Web Audio API components
+        this.audioContext = new AudioContext();
+        this.mediaStreamSource = this.audioContext.createMediaStreamSource(stream);
+        
+        // Create a processor for collecting audio data
+        this.processor = this.audioContext.createScriptProcessor(16384, 1, 1);
+        this.mediaStreamSource.connect(this.processor);
+        this.processor.connect(this.audioContext.destination);
+        
+        this.chunks = [];
+        this.temporaryTranscriptions = [];
+        this.recordingStartTime = Date.now();
+        this.isRecording = true;
+        
+        // Set up audio processing
+        this.processor.onaudioprocess = (e) => {
+          if (this.isRecording) {
+            const inputData = e.inputBuffer.getChannelData(0);
+            this.chunks.push(new Float32Array(inputData));
+            
+            // Check if we've recorded enough for a chunk (30 seconds)
+            const totalSamples = this.chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            const duration = totalSamples / (this.audioContext?.sampleRate ?? 48000);
+            
+            if (duration >= 30) {
+              this.processCurrentChunk();
+            }
+          }
+        };
+      } catch (err) {
+        console.error('Error accessing microphone:', err);
+        alert('Unable to access microphone.');
+      }
+    }
+  }
+
+  private async processCurrentChunk(): Promise<void> {
+    if (this.chunks.length === 0) return;
+
+    // Combine all chunks into a single buffer
+    const totalLength = this.chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const combinedBuffer = new Float32Array(totalLength);
+    let offset = 0;
+    
+    for (const chunk of this.chunks) {
+      combinedBuffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    // Convert to WAV
+    const wavBuffer = this.float32ToWav(combinedBuffer, this.audioContext?.sampleRate ?? this.DEFAULT_SAMPLE_RATE);
+    const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+    const wavFile = new File([wavBlob], 'chunk.wav', { type: 'audio/wav' });
+
+    // Clear chunks for next iteration
+    this.chunks = [];
+
+    try {
+      const transcription = await this.uploadChunk(wavFile);
+      if (transcription) {
+        this.temporaryTranscriptions.push(transcription);
+        this.updateTranscriptionProgress();
+      }
+    } catch (error) {
+      console.error('Error processing chunk:', error);
+    }
+  }
+
+  private float32ToWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    // Write WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    // Write audio data
+    const volume = 0.8;
+    for (let i = 0; i < samples.length; i++) {
+      const sample = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(44 + i * 2, sample * 0x7FFF * volume, true);
+    }
+
+    return buffer;
+  }
+
+  // Stop recording
+  stopRecording(): void {
+    this.isRecording = false;
+
+    // Stop and cleanup Web Audio API components
+    if (this.processor) {
+      this.processor.disconnect();
+      this.processor = null;
+    }
+    if (this.mediaStreamSource) {
+      this.mediaStreamSource.disconnect();
+      this.mediaStreamSource = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    // Process any remaining audio data
+    if (this.chunks.length > 0) {
+      this.processCurrentChunk().then(() => {
+        // After processing the last chunk, save the complete transcription
+        const finalTranscription = this.temporaryTranscriptions.join(' ');
+        this.saveFinalTranscription(finalTranscription);
+      });
+    }
+
+    // Stop the media stream
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+  }
+
+  private async uploadChunk(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('is_chunk', 'true');
+    formData.append('model', this.getSelectedModelValue());
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    try {
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/upload-chunk/`, 
+        formData, 
+        { headers }
+      ).toPromise();
+      
+      return response.transcription;
+    } catch (error) {
+      console.error('Error uploading chunk:', error);
+      throw error;
+    }
+  }
+
+  private async saveFinalTranscription(transcription: string): Promise<void> {
+    const formData = new FormData();
+    formData.append('transcription', transcription);
+    formData.append('is_final', 'true');
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${this.token}`
+    });
+
+    try {
+      const response = await this.http.post<any>(
+        `${environment.apiUrl}/save-transcription/`, 
+        formData, 
+        { headers }
+      ).toPromise();
+
+      this.ngZone.run(() => {
+        this.transcription = response.transcription;
+        this.transcriptionFile = response.transcription_file;
+        this.isTranscribing = false;
+        this.selectedUploadId = response.upload_id;
+        this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
+      });
+
+      this.fetchHistory();
+    } catch (error) {
+      console.error('Error saving final transcription:', error);
+      alert('Error saving transcription');
+    }
+  }
+
+  private updateTranscriptionProgress(): void {
+    this.ngZone.run(() => {
+      const currentTranscription = this.temporaryTranscriptions.join(' ');
+      this.transcription = currentTranscription + ' (Transcribing...)';
+    });
+  }
+
 
   // Add this helper method
   getSelectedModelValue(): string {
@@ -292,6 +503,7 @@ export class TranscriberComponent implements OnInit {
   // Télécharger le fichier audio vers le serveur
   // Dans la méthode selectUpload
   selectUpload(upload_id: number): void {
+    // Reset audio stream URL first
     this.audioStreamUrl = null;
     this.selectedUploadId = upload_id;
     this.transcription = null;
@@ -307,9 +519,7 @@ export class TranscriberComponent implements OnInit {
       response => {
         this.ngZone.run(() => {
           this.selectedTranscription = response.transcription;
-          this.isEditor = response.is_editor;
-          // Update UI state
-          this.updateUIAfterTranscriptionFetch();
+          this.isEditor = response.is_editor; // Mettre à jour le rôle
         });
       },
       error => {
@@ -317,17 +527,6 @@ export class TranscriberComponent implements OnInit {
         alert('Error fetching transcription');
       }
     );
-  }
-
-  private updateUIAfterTranscriptionFetch(): void {
-    // Update audio player
-    if (this.selectedUploadId) {
-      this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${this.selectedUploadId}`;
-    }
-    
-    // Reset editing state
-    this.isEditing = false;
-    this.editedTranscription = '';
   }
 
 
@@ -403,232 +602,11 @@ export class TranscriberComponent implements OnInit {
     );
   }
 
-  // Démarrer l'enregistrement audio
-  startRecording(): void {
-    this.streamChunks = [];
-    this.transcription = '';
-    
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          this.mediaStream = stream;
-          const options: MediaRecorderOptions = {
-            mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-          };
 
-          this.mediaRecorder = new MediaRecorder(stream, options);
-          this.audioChunks = [];
-          this.streamChunks = [];
-          this.recordingStartTime = Date.now();
+  
 
-          // Start recording
-          this.mediaRecorder.start();
-          this.isRecording = true;
-          console.log('Recording started.');
-
-          // Set up chunk timer
-          this.setupChunkProcessing();
-
-          this.mediaRecorder.ondataavailable = event => {
-            if (event.data.size > 0) {
-              this.audioChunks.push(event.data);
-              console.log('Data available:', event.data);
-            }
-          };
-
-          this.mediaRecorder.onstop = async () => {
-            // Clear chunk timer
-            if (this.chunkTimer) {
-              clearInterval(this.chunkTimer);
-            }
-
-            // Wait for any pending chunk processing to complete
-            await this.processFinalChunk();
-
-            // Combine all transcriptions
-            const finalTranscription = this.combineTranscriptions();
-            
-            // Update UI with final transcription
-            this.ngZone.run(() => {
-              this.transcription = finalTranscription;
-              this.isRecording = false;
-            });
-
-            // Clean up
-            if (this.mediaStream) {
-              this.mediaStream.getTracks().forEach(track => track.stop());
-              this.mediaStream = null;
-            }
-          };
-        })
-        .catch(err => {
-          console.error('Error accessing microphone:', err);
-          alert('Unable to access microphone.');
-        });
-    } else {
-      alert('Your browser does not support audio recording.');
-    }
-  }
-
-  private setupChunkProcessing(): void {
-    this.chunkTimer = setInterval(() => {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording' && !this.isProcessingChunk) {
-        this.processCurrentChunk();
-      }
-    }, this.chunkInterval);
-  }
-
-  private async processCurrentChunk(): Promise<void> {
-    if (!this.mediaRecorder || this.isProcessingChunk || this.audioChunks.length === 0) return;
-
-    this.isProcessingChunk = true;
-    
-    try {
-      // Create a new MediaRecorder for the next chunk while processing the current one
-      const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const options: MediaRecorderOptions = {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      };
-      
-      // Set up new recorder
-      const newRecorder = new MediaRecorder(newStream, options);
-      newRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.recordingBuffer.push(event.data);
-        }
-      };
-      
-      // Start new recorder
-      newRecorder.start();
-      
-      // Create blob from current chunks
-      const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder.mimeType });
-      
-      // Clear chunks array for next recording segment
-      this.audioChunks = [];
-      
-      // Stop current recorder and clean up
-      const oldRecorder = this.mediaRecorder;
-      const oldStream = this.mediaStream;
-      
-      // Switch to new recorder
-      this.mediaRecorder = newRecorder;
-      this.mediaStream = newStream;
-      
-      // Stop old recorder and stream
-      if (oldRecorder && oldRecorder.state === 'recording') {
-        oldRecorder.stop();
-      }
-      if (oldStream) {
-        oldStream.getTracks().forEach(track => track.stop());
-      }
-      
-      // Add to processing queue
-      this.processingQueue = this.processingQueue
-        .then(() => this.uploadChunk(audioBlob))
-        .catch(error => {
-          console.error('Error processing chunk:', error);
-        });
-        
-      await this.processingQueue;
-      
-    } catch (error) {
-      console.error('Error during chunk processing:', error);
-    } finally {
-      this.isProcessingChunk = false;
-    }
-  }
-
-  private async processFinalChunk(): Promise<void> {
-    if (this.audioChunks.length > 0) {
-      const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
-      await this.uploadChunk(audioBlob);
-      
-      // After final chunk is processed, update UI and fetch history
-      this.ngZone.run(() => {
-        this.fetchHistory();
-        if (this.selectedUploadId) {
-          this.selectUpload(this.selectedUploadId);
-        }
-      });
-    }
-  }
-
-  private async uploadChunk(audioBlob: Blob): Promise<void> {
-    if (audioBlob.size === 0) return;
-    
-    const formData = new FormData();
-    const fileName = `chunk_${Date.now()}.webm`;
-    const audioFile = new File([audioBlob], fileName, { type: audioBlob.type });
-    
-    formData.append('file', audioFile);
-    formData.append('model', this.getSelectedModelValue());
-
-    const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
-    });
-
-    try {
-      const response = await this.http.post<any>(
-        `${environment.apiUrl}/upload-audio/`,
-        formData,
-        { headers }
-      ).toPromise();
-
-      this.streamChunks.push({
-        blob: audioBlob,
-        text: response.transcription
-      });
-
-      // Update UI with intermediate results
-      this.ngZone.run(() => {
-        this.transcription = this.combineTranscriptions();
-        this.selectedUploadId = response.upload_id;
-        this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
-        
-        // Auto-share with configured users
-        this.autoShareConfigs.forEach(config => {
-          this.shareWithUser(config.userId, config.accessType);
-        });
-        
-        // Update history and fetch latest transcription
-        this.fetchHistory();
-        if (this.selectedUploadId) {
-          this.fetchTranscriptionInfo(this.selectedUploadId);
-        }
-      });
-    } catch (error) {
-      console.error('Error processing audio chunk:', error);
-    }
-  }
-
-  private combineTranscriptions(): string {
-    return this.streamChunks
-      .map(chunk => chunk.text)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  stopRecording(): void {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      this.mediaRecorder.stop();
-      this.isRecording = false;
-      console.log('Recording stopped.');
-    }
-
-    if (this.chunkTimer) {
-      clearInterval(this.chunkTimer);
-    }
-
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-  }
-
-
-
+  // Arrêter l'enregistrement audio
+  
 
   // Télécharger la transcription en tant que fichier texte
   downloadTranscription(): void {
@@ -691,6 +669,7 @@ export class TranscriberComponent implements OnInit {
 
     this.http.put(`${environment.apiUrl}/history/${this.selectedUploadId}`, formData, { headers }).subscribe(
       () => {
+        // Update both transcription sources
         if (this.transcription) {
           this.transcription = this.editedTranscription;
         }
@@ -745,83 +724,96 @@ export class TranscriberComponent implements OnInit {
 
   downloadTranscriptionFile(upload_id: number): void {
     const headers = new HttpHeaders({
-      'Authorization': `Bearer ${this.token}`
+        'Authorization': `Bearer ${this.token}`
     });
 
     const url = `${environment.apiUrl}/download-transcription/${upload_id}`;
     this.http.get(url, { 
-      headers, 
-      responseType: 'blob',
-      observe: 'response' 
+        headers, 
+        responseType: 'blob',
+        observe: 'response' 
     }).subscribe(
-      response => {
-        const blob = new Blob([response.body!], { type: 'text/plain' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Patient_${upload_id}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-      },
-      error => {
-        console.error('Error downloading transcription file:', error);
-        if (error.status === 404) {
-          alert('Fichier de transcription non trouvé ou accès refusé');
-        } else {
-          alert('Erreur lors du téléchargement du fichier de transcription');
+        response => {
+            const blob = new Blob([response.body!], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Patient_${upload_id}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        },
+        error => {
+            console.error('Error downloading transcription file:', error);
+            if (error.status === 404) {
+                alert('Fichier de transcription non trouvé ou accès refusé');
+            } else {
+                alert('Erreur lors du téléchargement du fichier de transcription');
+            }
         }
-      }
     );
-  }
+}
 
 
-  downloadAudioFile(upload_id: number): void {
-    const headers = new HttpHeaders({
+downloadAudioFile(upload_id: number): void {
+  const headers = new HttpHeaders({
       'Authorization': `Bearer ${this.token}`
-    });
+  });
 
-    const url = `${environment.apiUrl}/download-audio/${upload_id}`;
-    this.http.get(url, { 
+  const url = `${environment.apiUrl}/download-audio/${upload_id}`;
+  this.http.get(url, { 
       headers, 
       responseType: 'blob',
       observe: 'response'
-    }).subscribe(
+  }).subscribe(
       response => {
-        const blob = new Blob([response.body!], { type: 'audio/wav' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Patient_${upload_id}.wav`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+          const blob = new Blob([response.body!], { type: 'audio/wav' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Patient_${upload_id}.wav`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
       },
       error => {
-        console.error('Error downloading audio file:', error);
-        if (error.status === 404) {
-          alert('Fichier audio non trouvé ou accès refusé');
-        } else {
-          alert('Erreur lors du téléchargement du fichier audio');
-        }
+          console.error('Error downloading audio file:', error);
+          if (error.status === 404) {
+              alert('Fichier audio non trouvé ou accès refusé');
+          } else {
+              alert('Erreur lors du téléchargement du fichier audio');
+          }
       }
-    );
-  }
+  );
+}
 
   // دانلود ترنسکریپشن به صورت PDF با نام بیمار
   downloadTranscriptionAsPDF(upload_id: number): void {
+    // Utiliser la transcription sélectionnée ou la transcription immédiate
     const transcriptionText = this.selectedTranscription || this.transcription;
+  
+    console.log('downloadTranscriptionAsPDF appelé avec upload_id:', upload_id);
+    console.log('Texte de transcription:', transcriptionText);
   
     if (transcriptionText) {
       try {
         const doc = new jsPDF();
+  
+        // Définir la police et la taille
         doc.setFont('Helvetica');
         doc.setFontSize(12);
-        const lines = doc.splitTextToSize(transcriptionText, 180);
+  
+        // Diviser le texte en lignes adaptées à la page
+        const lines = doc.splitTextToSize(transcriptionText, 180); // Ajustez la largeur si nécessaire
+  
+        // Ajouter le texte au PDF
         doc.text(lines, 10, 10);
+  
+        // Sauvegarder le PDF avec le nom du patient
         doc.save(`Patient_${upload_id}.pdf`);
+        console.log(`Transcription téléchargée en tant que PDF : Patient_${upload_id}.pdf`);
       } catch (error) {
         console.error('Erreur lors de la création du PDF:', error);
         alert('Erreur lors de la création du fichier PDF.');
@@ -1020,7 +1012,3 @@ export class TranscriberComponent implements OnInit {
     }
   }
   
-  
-
-
-

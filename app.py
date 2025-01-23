@@ -2,10 +2,9 @@
 import os
 import re
 import librosa
-import pytz
 import torch
 from fastapi import (
-    Body, FastAPI, File, UploadFile, HTTPException, Depends, Form, status
+    FastAPI, File, UploadFile, HTTPException, Depends, Form, status
 )
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -29,7 +28,7 @@ from auth import (
     get_password_hash, create_access_token,
     decode_access_token
 )
-from datetime import timedelta
+from datetime import datetime, timedelta
 import uuid
 from werkzeug.utils import secure_filename  # For filename sanitization
 import logging
@@ -37,10 +36,6 @@ import aiofiles
 from collections import defaultdict
 from sqlalchemy import or_
 from typing import List
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-from datetime import datetime, timedelta
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -551,8 +546,10 @@ async def download_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Endpoint to download the audio file."""
+    """Endpoint to download the audio file.
+    Allows access for both owners and users with shared access."""
     
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -567,13 +564,6 @@ async def download_audio(
         raise HTTPException(
             status_code=404, 
             detail="Audio file not found or access denied"
-        )
-
-    if upload.audio_deleted:
-        logger.warning(f"Audio file has been automatically deleted after 7 days: {upload_id}")
-        raise HTTPException(
-            status_code=404,
-            detail="Audio file has been automatically deleted after 7 days"
         )
 
     audio_path = os.path.join(AUDIO_DIR, upload.filename)
@@ -935,8 +925,10 @@ async def stream_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Stream an audio file with proper headers for HTML5 audio player."""
+    """Stream an audio file with proper headers for HTML5 audio player.
+    Allows access for both owners and users with shared access."""
     
+    # Check user access
     upload = db.query(Upload).filter(
         Upload.id == upload_id
     ).filter(
@@ -951,13 +943,6 @@ async def stream_audio(
         raise HTTPException(
             status_code=404, 
             detail="Audio file not found or access denied"
-        )
-
-    if upload.audio_deleted:
-        logger.warning(f"Audio file has been automatically deleted after 7 days: {upload_id}")
-        raise HTTPException(
-            status_code=404,
-            detail="Audio file has been automatically deleted after 7 days"
         )
 
     audio_path = os.path.join(AUDIO_DIR, upload.filename)
@@ -1122,244 +1107,82 @@ async def remove_share(
     
     return {"message": "Share access removed successfully"}
 
-
-@app.post("/stream-process/")
-async def stream_process(
+@app.post("/upload-chunk/")
+async def upload_chunk(
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user),
-    model: str = Form("openai/whisper-large-v3-turbo"),
-    db: Session = Depends(get_db),
+    is_chunk: bool = Form(False),
+    model: str = Form("openai/whisper-large-v3"),
+    user: User = Depends(get_current_user)
 ):
-    """
-    Endpoint for streaming audio processing that returns partial transcriptions.
-    """
-    logger.info(f"Starting streaming process for user {user.username}")
-    
-    # Initialize response queue
-    response_queue = asyncio.Queue()
-    
-    # Create a temporary file for the chunk
-    temp_dir = "temp_audio_chunks"
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_file = os.path.join(temp_dir, f"chunk_{uuid.uuid4().hex}.wav")
-    
+    """Handle uploaded audio chunks during recording"""
     try:
-        # Save chunk to temporary file
-        async with aiofiles.open(temp_file, "wb") as f:
-            content = await file.read()
-            await f.write(content)
-
-        # Convert to WAV if needed
-        content_type = file.content_type.split(";")[0].strip()
-        if content_type != "audio/wav":
-            try:
-                audio = AudioSegment.from_file(temp_file)
-                audio = audio.set_channels(1)
-                audio.export(temp_file, format="wav")
-            except Exception as e:
-                logger.error(f"Error converting audio chunk: {e}")
-                raise HTTPException(status_code=400, detail=str(e))
-
-        # Get ASR pipeline
+        # Save chunk temporarily
+        chunk_filename = f"temp_chunk_{datetime.now().timestamp()}.wav"
+        chunk_path = os.path.join(AUDIO_DIR, chunk_filename)
+        
         try:
+            # Save the WAV file directly (it's already in WAV format)
+            async with aiofiles.open(chunk_path, "wb") as out_file:
+                content = await file.read()
+                await out_file.write(content)
+
+            # Process WAV chunk
             asr_pipeline = get_asr_pipeline(model)
-        except Exception as e:
-            logger.error(f"Error getting ASR pipeline: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-        # Process audio in thread pool
-        try:
-            # Load audio data
-            audio_data, samplerate = librosa.load(temp_file, sr=16000)
-            
-            # Process transcription
-            result = await asyncio.get_event_loop().run_in_executor(
+            transcription = await asyncio.get_event_loop().run_in_executor(
                 executor,
-                lambda: asr_pipeline(audio_data)["text"]
+                process_transcription,
+                chunk_path,
+                asr_pipeline
             )
-            
-            # Clean up the transcription
-            transcription = remplacer_ponctuation(result)
-            
-            return JSONResponse({
-                "status": "success",
-                "transcription": transcription.strip(),
-                "is_final": True
-            })
 
-        except Exception as e:
-            logger.error(f"Error processing audio chunk: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            return {"transcription": transcription.strip()}
 
-    finally:
-        # Cleanup temporary file
-        try:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        except Exception as e:
-            logger.error(f"Error cleaning up temporary file: {e}")
+        finally:
+            # Clean up temporary file
+            if os.path.exists(chunk_path):
+                try:
+                    os.remove(chunk_path)
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary file {chunk_path}: {e}")
 
-@app.post("/complete-stream/")
-async def complete_stream(
-    user: User = Depends(get_current_user),
-    transcriptions: List[str] = Body(...),
-    db: Session = Depends(get_db)
-):
-    """
-    Endpoint to finalize streaming process and save the complete transcription.
-    """
-    try:
-        # Combine all transcriptions
-        complete_transcription = " ".join(transcriptions)
-        complete_transcription = remplacer_ponctuation(complete_transcription)
-
-        # Generate unique ID
-        unique_id = uuid.uuid4().hex
-        
-        # Save final transcription
-        transcription_filename = f"{unique_id}_transcription.txt"
-        transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
-        
-        async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
-            await f.write(complete_transcription)
-            
-        # Create upload record
-        if user.username != 'word':
-            upload_record = Upload(
-                filename=f"{unique_id}.wav",
-                transcription_filename=transcription_filename,
-                owner=user,
-            )
-            db.add(upload_record)
-            await db.commit()
-            await db.refresh(upload_record)
-            
-            return {
-                "status": "success",
-                "transcription": complete_transcription,
-                "upload_id": upload_record.id
-            }
-        else:
-            return {
-                "status": "success",
-                "transcription": complete_transcription
-            }
-            
     except Exception as e:
-        logger.error(f"Error completing stream: {e}")
+        logger.error(f"Error processing chunk: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-
-
-async def cleanup_old_audio_files():
-    """
-    Cleanup function to delete audio files older than 7 days and archive their uploads
-    Includes catch-up functionality for missed cleanups
-    """
-    logger.info("Starting cleanup of old audio files")
-    
+@app.post("/save-transcription/")
+async def save_transcription(
+    transcription: str = Form(...),
+    is_final: bool = Form(False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save final transcription after recording is complete"""
     try:
-        db = SessionLocal()
-        # Get all non-deleted uploads that are older than 7 days
-        seven_days_ago = datetime.now(pytz.timezone('Europe/Paris')) - timedelta(days=7)
-        
-        uploads_to_cleanup = db.query(Upload).filter(
-            Upload.audio_deleted == False,
-            Upload.upload_time <= seven_days_ago
-        ).all()
-        
-        cleanup_count = 0
-        for upload in uploads_to_cleanup:
-            try:
-                audio_path = os.path.join(AUDIO_DIR, upload.filename)
-                
-                # Delete audio file if it exists
-                if os.path.exists(audio_path):
-                    os.remove(audio_path)
-                    logger.info(f"Deleted audio file: {audio_path}")
-                
-                # Update database record
-                upload.audio_deleted = True
-                upload.is_archived = True
-                cleanup_count += 1
-                
-            except Exception as e:
-                logger.error(f"Error processing upload {upload.id}: {e}")
-                continue
-        
-        if cleanup_count > 0:
-            try:
-                db.commit()
-                logger.info(f"Successfully processed {cleanup_count} uploads")
-            except Exception as e:
-                logger.error(f"Error committing changes: {e}")
-                db.rollback()
-        
-    except Exception as e:
-        logger.error(f"Error in cleanup task: {e}")
-    finally:
-        db.close()
+        # Generate unique ID for the transcription
+        unique_id = uuid.uuid4().hex
+        transcription_filename = f"{unique_id}_transcription.txt"
+        transcription_path = os.path.join(AUDIO_DIR, transcription_filename)
 
-# Initialize scheduler with better error handling and persistence
-scheduler = AsyncIOScheduler(
-    timezone='Europe/Paris',
-    job_defaults={
-        'misfire_grace_time': 60 * 60,  # 1 hour grace time for misfired jobs
-        'coalesce': True,  # Combine multiple missed runs into a single run
-        'max_instances': 1  # Prevent multiple instances of the same job from running
-    }
-)
+        # Save transcription
+        async with aiofiles.open(transcription_path, "w", encoding="utf-8") as f:
+            await f.write(transcription)
 
-@app.on_event("startup")
-async def start_scheduler():
-    """
-    Start the background scheduler on app startup with both daily and catch-up schedules
-    """
-    try:
-        # Run cleanup every day at midnight
-        scheduler.add_job(
-            cleanup_old_audio_files,
-            CronTrigger(
-                hour=0,
-                minute=0,
-                timezone='Europe/Paris'
-            ),
-            id='daily_cleanup',
-            replace_existing=True
+        # Create database record
+        upload_record = Upload(
+            filename=f"{unique_id}.txt",  # No audio file in this case
+            transcription_filename=transcription_filename,
+            owner=user
         )
-        
-        # Additional catch-up job that runs every 4 hours
-        scheduler.add_job(
-            cleanup_old_audio_files,
-            IntervalTrigger(
-                hours=4,
-                timezone='Europe/Paris'
-            ),
-            id='catchup_cleanup',
-            replace_existing=True
-        )
+        db.add(upload_record)
+        db.commit()
+        db.refresh(upload_record)
 
-        # Run an immediate cleanup on startup
-        scheduler.add_job(
-            cleanup_old_audio_files,
-            trigger='date',
-            run_date=datetime.now() + timedelta(seconds=30),  # Run 30 seconds after startup
-            id='startup_cleanup',
-            replace_existing=True
-        )
-        
-        scheduler.start()
-        logger.info("Started background scheduler for audio cleanup")
-        
-    except Exception as e:
-        logger.error(f"Error starting scheduler: {e}")
-        raise
+        return {
+            "transcription": transcription,
+            "transcription_file": transcription_filename,
+            "upload_id": upload_record.id
+        }
 
-@app.on_event("shutdown")
-async def stop_scheduler():
-    """Stop the background scheduler on app shutdown"""
-    try:
-        scheduler.shutdown(wait=False)  # Don't wait for jobs to complete
-        logger.info("Stopped background scheduler")
     except Exception as e:
-        logger.error(f"Error stopping scheduler: {e}")
+        logger.error(f"Error saving transcription: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
