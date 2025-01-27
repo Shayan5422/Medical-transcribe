@@ -427,19 +427,26 @@ async def process_chunk(
             await f.write(transcription.strip())
             
         if is_final:
-            # Combine all chunks
-            combined_audio = AudioSegment.empty()
+            # Combine all chunks with crossfade
+            combined_audio = None
             combined_trans = []
             chunk_num = 0
+            
             while True:
                 wav_path = os.path.join(session_dir, f"chunk_{chunk_num}.wav")
                 trans_path = os.path.join(session_dir, f"chunk_{chunk_num}_trans.txt")
                 if not os.path.exists(wav_path):
                     break
                     
-                # Combine audio
+                # Load chunk audio
                 chunk_audio = AudioSegment.from_wav(wav_path)
-                combined_audio += chunk_audio
+                
+                # Initialize combined audio or add with crossfade
+                if combined_audio is None:
+                    combined_audio = chunk_audio
+                else:
+                    # Add 100ms crossfade between chunks to prevent clicks/pops
+                    combined_audio = combined_audio.append(chunk_audio, crossfade=100)
                 
                 # Combine transcription
                 async with aiofiles.open(trans_path, "r", encoding="utf-8") as f:
@@ -448,15 +455,20 @@ async def process_chunk(
                 
                 chunk_num += 1
             
-            # Save final files
-            final_audio_path = os.path.join(AUDIO_DIR, f"{session_id}.wav")
-            combined_audio.export(final_audio_path, format="wav")
-            
-            final_trans = " ".join(combined_trans)
-            final_trans_path = os.path.join(AUDIO_DIR, f"{session_id}_transcription.txt")
-            async with aiofiles.open(final_trans_path, "w", encoding="utf-8") as f:
-                await f.write(final_trans)
-            
+            if combined_audio:
+                # Normalize audio levels
+                combined_audio = combined_audio.normalize()
+                
+                # Save final files
+                final_audio_path = os.path.join(AUDIO_DIR, f"{session_id}.wav")
+                combined_audio.export(final_audio_path, format="wav")
+                
+                # Join transcriptions with proper spacing
+                final_trans = " ".join(combined_trans)
+                final_trans_path = os.path.join(AUDIO_DIR, f"{session_id}_transcription.txt")
+                async with aiofiles.open(final_trans_path, "w", encoding="utf-8") as f:
+                    await f.write(final_trans)
+
             # Create upload record
             if user.username != 'word':
                 upload_record = Upload(
