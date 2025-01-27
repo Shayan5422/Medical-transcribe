@@ -427,7 +427,7 @@ export class TranscriberComponent implements OnInit {
           console.log('Using MIME type:', selectedMimeType);
           const options: MediaRecorderOptions = {
             mimeType: selectedMimeType,
-            audioBitsPerSecond: 256000
+            audioBitsPerSecond: 128000 // Reduced bitrate for better compatibility
           };
 
           this.mediaRecorder = new MediaRecorder(stream, options);
@@ -438,66 +438,37 @@ export class TranscriberComponent implements OnInit {
           this.recordingStartTime = Date.now();
           
           // Configure data collection
-          this.mediaRecorder.ondataavailable = async event => {
+          this.mediaRecorder.ondataavailable = event => {
             if (event.data && event.data.size > 0) {
-              console.log(`Received audio data: ${event.data.size} bytes, type: ${event.data.type}`);
               this.audioChunks.push(event.data);
             }
           };
 
-          this.mediaRecorder.onstop = async () => {
-            console.log('MediaRecorder stopped, processing chunk...');
-            if (this.audioChunks.length > 0) {
-              try {
-                // Convert to WAV
-                const audioContext = new AudioContext({
-                  sampleRate: 16000,
-                });
-                
-                const blob = new Blob(this.audioChunks, { type: selectedMimeType });
-                const arrayBuffer = await blob.arrayBuffer();
-                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                
-                // Create WAV file
-                const wavBlob = await this.audioBufferToWav(audioBuffer);
-                
-                // Process the WAV chunk
-                await this.processCurrentChunk(false, wavBlob);
-                
-                audioContext.close();
-                
-                if (this.isRecording) {
-                  console.log('Starting next chunk...');
-                  this.audioChunks = [];
-                  this.mediaRecorder?.start(1000);
-                }
-              } catch (error) {
-                console.error('Error processing audio chunk:', error);
-                if (this.isRecording) {
-                  this.audioChunks = [];
-                  this.mediaRecorder?.start(1000);
-                }
-              }
-            } else {
-              console.log('No audio data to process');
-              if (this.isRecording) {
-                this.mediaRecorder?.start(1000);
-              }
+          // Handle chunk processing
+          this.mediaRecorder.onstop = () => {
+            const currentChunks = [...this.audioChunks];
+            this.audioChunks = []; // Reset for next chunk
+            
+            // Process chunk asynchronously
+            this.processChunkAsync(currentChunks, this.currentChunkNumber++);
+            
+            // Continue recording immediately if not final
+            if (this.isRecording) {
+              this.mediaRecorder?.start(1000);
             }
           };
 
-          // Start recording with timeslice to get data frequently
+          // Start recording
           this.mediaRecorder.start(1000);
           this.isRecording = true;
-          console.log('Recording started with timeslice of 1 second');
+          console.log('Recording started');
 
-          // Process chunks every 30 seconds
+          // Set interval for chunk processing
           this.chunkInterval = setInterval(() => {
             if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-              console.log('Stopping recorder for chunk processing...');
               this.mediaRecorder.stop();
             }
-          }, 30000);
+          }, 10000); // Process every 10 seconds
         })
         .catch(err => {
           console.error('Error accessing microphone:', err);
@@ -508,135 +479,148 @@ export class TranscriberComponent implements OnInit {
     }
   }
 
-  // Convert AudioBuffer to WAV Blob
-  private audioBufferToWav(buffer: AudioBuffer): Promise<Blob> {
-    const numberOfChannels = 1;
-    const sampleRate = buffer.sampleRate;
-    const format = 1; // PCM
-    const bitDepth = 16;
-    
-    const bytesPerSample = bitDepth / 8;
-    const blockAlign = numberOfChannels * bytesPerSample;
-    
-    const wav = new ArrayBuffer(44 + buffer.length * bytesPerSample);
-    const view = new DataView(wav);
-    
-    // Write WAV header
-    const writeString = (view: DataView, offset: number, string: string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    };
-    
-    writeString(view, 0, 'RIFF');  // ChunkID
-    view.setUint32(4, 36 + buffer.length * bytesPerSample, true);  // ChunkSize
-    writeString(view, 8, 'WAVE');  // Format
-    writeString(view, 12, 'fmt ');  // Subchunk1ID
-    view.setUint32(16, 16, true);  // Subchunk1Size
-    view.setUint16(20, format, true);  // AudioFormat
-    view.setUint16(22, numberOfChannels, true);  // NumChannels
-    view.setUint32(24, sampleRate, true);  // SampleRate
-    view.setUint32(28, sampleRate * blockAlign, true);  // ByteRate
-    view.setUint16(32, blockAlign, true);  // BlockAlign
-    view.setUint16(34, bitDepth, true);  // BitsPerSample
-    writeString(view, 36, 'data');  // Subchunk2ID
-    view.setUint32(40, buffer.length * bytesPerSample, true);  // Subchunk2Size
-    
-    // Write audio data
-    const offset = 44;
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      const sample = Math.max(-1, Math.min(1, data[i]));
-      view.setInt16(offset + i * bytesPerSample, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-    }
-    
-    return Promise.resolve(new Blob([wav], { type: 'audio/wav' }));
-  }
-
-  // Process current audio chunk
-  private async processCurrentChunk(isFinal: boolean, wavBlob?: Blob): Promise<void> {
-    console.log(`Processing chunk ${this.currentChunkNumber}, isFinal: ${isFinal}`);
-    
-    if (!wavBlob && this.audioChunks.length === 0) {
-      console.log('No audio chunks to process');
-      return;
-    }
-
-    const audioBlob = wavBlob || await this.convertToWav();
-    console.log(`Created WAV blob of size: ${audioBlob.size} bytes`);
-
-    const formData = new FormData();
-    formData.append('file', audioBlob, `chunk_${this.currentChunkNumber}.wav`);
-    formData.append('chunk_number', this.currentChunkNumber.toString());
-    formData.append('session_id', this.sessionId);
-    formData.append('is_final', isFinal.toString());
-    formData.append('model', this.getSelectedModelValue());
-
+  private async processChunkAsync(chunks: Blob[], chunkNumber: number, retryCount = 0): Promise<void> {
     try {
-      console.log(`Sending chunk ${this.currentChunkNumber} to server...`);
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      
+      // Combine chunks into a single blob
+      const blob = new Blob(chunks, { type: chunks[0].type });
+      
+      // Convert to buffer
+      const arrayBuffer = await blob.arrayBuffer();
+      let audioBuffer: AudioBuffer;
+      
+      try {
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      } catch (decodeError) {
+        console.error('Audio decoding failed:', decodeError);
+        audioContext.close();
+        return; // Skip this chunk but continue recording
+      }
+      
+      // Convert to WAV
+      const wavBlob = await this.audioBufferToWav(audioBuffer);
+      audioContext.close();
+
+      // Send to server
+      const formData = new FormData();
+      formData.append('file', wavBlob, `chunk_${chunkNumber}.wav`);
+      formData.append('chunk_number', chunkNumber.toString());
+      formData.append('session_id', this.sessionId);
+      formData.append('is_final', (!this.isRecording).toString());
+      formData.append('model', this.getSelectedModelValue());
+
       const headers = new HttpHeaders({
         'Authorization': `Bearer ${this.token}`
       });
 
-      const response = await this.http.post<any>(
-        `${environment.apiUrl}/process-chunk/`,
-        formData,
-        { headers }
-      ).toPromise();
+      try {
+        const response = await this.http.post<any>(
+          `${environment.apiUrl}/process-chunk/`,
+          formData,
+          { headers }
+        ).toPromise();
 
-      console.log(`Server response for chunk ${this.currentChunkNumber}:`, response);
-
-      if (isFinal) {
-        this.ngZone.run(() => {
-          this.transcription = response.transcription;
-          this.isTranscribing = false;
-          if (response.upload_id) {
-            this.selectedUploadId = response.upload_id;
-            this.selectedUploadForShare = response.upload_id;
-            this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
-            
-            // Auto-share with configured users
-            this.autoShareConfigs.forEach(config => {
-              this.shareWithUser(config.userId, config.accessType);
-            });
-          }
-          this.fetchHistory();
-        });
-      } else {
-        this.tempTranscriptions[this.currentChunkNumber] = response.chunk_transcription;
-        this.currentChunkNumber++;
+        // Handle response
+        if (!this.isRecording) { // Final chunk
+          this.ngZone.run(() => {
+            this.transcription = response.transcription;
+            this.isTranscribing = false;
+            if (response.upload_id) {
+              this.selectedUploadId = response.upload_id;
+              this.selectedUploadForShare = response.upload_id;
+              this.audioStreamUrl = `${environment.apiUrl}/stream-audio/${response.upload_id}`;
+              this.autoShareConfigs.forEach(config => {
+                this.shareWithUser(config.userId, config.accessType);
+              });
+            }
+            this.fetchHistory();
+          });
+        } else if (response.chunk_transcription) {
+          this.ngZone.run(() => {
+            this.tempTranscriptions[chunkNumber] = response.chunk_transcription;
+            // Only update transcription if we have all chunks up to this point
+            let allChunksPresent = true;
+            for (let i = 0; i <= chunkNumber; i++) {
+              if (!this.tempTranscriptions[i]) {
+                allChunksPresent = false;
+                break;
+              }
+            }
+            if (allChunksPresent) {
+              this.transcription = this.tempTranscriptions.filter(t => t).join(' ');
+            }
+          });
+        }
+      } catch (serverError) {
+        console.error('Server error processing chunk:', serverError);
         
-        // Update the displayed transcription with all chunks so far
+        // Retry logic for server errors
+        if (retryCount < 3 && this.isRecording) {
+          console.log(`Retrying chunk ${chunkNumber}, attempt ${retryCount + 1}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+          return this.processChunkAsync(chunks, chunkNumber, retryCount + 1);
+        }
+        
+        // If final chunk fails, mark as not transcribing
+        if (!this.isRecording) {
+          this.ngZone.run(() => {
+            this.isTranscribing = false;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error processing chunk:', error);
+      if (!this.isRecording) {
         this.ngZone.run(() => {
-          this.transcription = this.tempTranscriptions.join(' ');
+          this.isTranscribing = false;
         });
       }
-    } catch (error: any) {
-      console.error('Error processing chunk:', error);
-      this.ngZone.run(() => {
-        if (error.error?.detail) {
-          alert(`Error: ${error.error.detail}`);
-        } else {
-          alert('Error processing audio chunk.');
-        }
-        this.isTranscribing = false;
-      });
     }
   }
 
-  private async convertToWav(): Promise<Blob> {
-    const audioContext = new AudioContext({
-      sampleRate: 16000,
+  private audioBufferToWav(buffer: AudioBuffer): Promise<Blob> {
+    return new Promise((resolve) => {
+      const numberOfChannels = 1;
+      const sampleRate = buffer.sampleRate;
+      const format = 1; // PCM
+      const bitDepth = 16;
+      const bytesPerSample = bitDepth / 8;
+      const blockAlign = numberOfChannels * bytesPerSample;
+      
+      const wav = new ArrayBuffer(44 + buffer.length * bytesPerSample);
+      const view = new DataView(wav);
+      
+      const writeString = (offset: number, string: string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + buffer.length * bytesPerSample, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, format, true);
+      view.setUint16(22, numberOfChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * blockAlign, true);
+      view.setUint16(32, blockAlign, true);
+      view.setUint16(34, bitDepth, true);
+      writeString(36, 'data');
+      view.setUint32(40, buffer.length * bytesPerSample, true);
+      
+      const data = buffer.getChannelData(0);
+      let offset = 44;
+      for (let i = 0; i < data.length; i++) {
+        const sample = Math.max(-1, Math.min(1, data[i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += bytesPerSample;
+      }
+      
+      resolve(new Blob([wav], { type: 'audio/wav' }));
     });
-    
-    const blob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType });
-    const arrayBuffer = await blob.arrayBuffer();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    
-    const wavBlob = await this.audioBufferToWav(audioBuffer);
-    audioContext.close();
-    
-    return wavBlob;
   }
 
   stopRecording(): void {
@@ -647,7 +631,10 @@ export class TranscriberComponent implements OnInit {
       if (this.mediaRecorder.state === 'recording') {
         this.mediaRecorder.stop();
         console.log('Processing final chunk...');
-        this.processCurrentChunk(true);
+        // Process the final chunk using the new method
+        const currentChunks = [...this.audioChunks];
+        this.audioChunks = [];
+        this.processChunkAsync(currentChunks, this.currentChunkNumber++);
       }
       
       this.isRecording = false;
