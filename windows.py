@@ -573,49 +573,53 @@ class MainWindow(QMainWindow):
         self.tray_icon.show()
 
     def create_normal_icon(self):
-        """Créer l'icône d'état normal"""
+        """Create normal state icon"""
         size = 64
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
         
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Dessiner le corps du microphone
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor('#4a90e2'))
-        
-        # Cercle principal
-        painter.drawEllipse(12, 12, 40, 40)
-        
-        # Microphone intérieur
-        painter.setBrush(QColor('white'))
-        painter.drawRoundedRect(24, 16, 16, 32, 8, 8)
-        
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # Draw microphone body
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor('#4a90e2'))
+            
+            # Main circle
+            painter.drawEllipse(12, 12, 40, 40)
+            
+            # Inner microphone
+            painter.setBrush(QColor('white'))
+            painter.drawRoundedRect(24, 16, 16, 32, 8, 8)
+        finally:
+            painter.end()
+            
         return QIcon(pixmap)
 
     def create_recording_icon(self):
-        """Créer l'icône d'état d'enregistrement"""
+        """Create recording state icon"""
         size = 64
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
         
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Dessiner l'indicateur d'enregistrement
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor('#e74c3c'))  # Rouge pour l'enregistrement
-        
-        # Cercle principal
-        painter.drawEllipse(12, 12, 40, 40)
-        
-        # Symbole d'enregistrement intérieur
-        painter.setBrush(QColor('white'))
-        painter.drawEllipse(24, 24, 16, 16)
-        
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # Draw recording indicator
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor('#e74c3c'))  # Red for recording
+            
+            # Main circle
+            painter.drawEllipse(12, 12, 40, 40)
+            
+            # Inner recording symbol
+            painter.setBrush(QColor('white'))
+            painter.drawEllipse(24, 24, 16, 16)
+        finally:
+            painter.end()
+            
         return QIcon(pixmap)
 
     def update_recording_status(self, is_recording):
@@ -893,23 +897,50 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
             """)
 
+    def remove_duplicates(self, text):
+        # Split into sentences (roughly)
+        sentences = text.split('.')
+        cleaned_sentences = []
+        
+        for i, sentence in enumerate(sentences):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            # Check if this sentence is a duplicate or part of another sentence
+            is_duplicate = False
+            for j, other_sentence in enumerate(sentences):
+                if i != j and sentence and other_sentence.strip():
+                    # Check if this sentence is contained within another
+                    if sentence in other_sentence:
+                        is_duplicate = True
+                        break
+                        
+            if not is_duplicate:
+                cleaned_sentences.append(sentence)
+                
+        return '. '.join(cleaned_sentences)
+
     def handle_transcription_update(self, transcription):
-        # Mettre à jour uniquement avec le nouveau chunk
+        # Just store the transcription without pasting
         self.current_transcription = transcription
-        time.sleep(0.2)
-        pyperclip.copy(transcription)
-        keyboard.send('ctrl+v')
         self.update_status("Mise à jour de la transcription...", "processing")
 
     def handle_transcription(self, transcription, upload_id):
-        # Assurez-vous que la transcription finale ne contient que le texte final
-        self.current_transcription = transcription
+        if not transcription:
+            return
+            
+        # Clean up any duplicate content
+        cleaned_transcription = self.remove_duplicates(transcription)
+        
+        # Add a space and paste the final transcription
+        final_text = cleaned_transcription + " "
         time.sleep(0.5)
-
-        pyperclip.copy(transcription)
+        pyperclip.copy(final_text)
         keyboard.send('ctrl+v')
+        self.current_transcription = final_text
+            
         self.update_status("Transcription terminée", "normal")
-
         self.show_notification("Transcription terminée", "Le texte final a été copié")
 
         self.selectedUploadId = upload_id
